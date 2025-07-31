@@ -74,10 +74,13 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 ## Commands
 
 ```bash
-make setup    # Create venv and install dependencies
-make run      # Run the bot
-make clean    # Remove venv
-make help     # Show available commands
+make setup       # Create venv and install dependencies
+make run         # Run the bot
+make clean       # Remove venv
+make format      # Format all Python files with black and isort
+make lint        # Run linting checks with ruff
+make format-check# Check if files are properly formatted
+make help        # Show available commands
 ```
 
 ## How it works
@@ -138,6 +141,7 @@ tmux send-keys -t claude-session "claude" Enter
 ## TODO
 
 ### Hook Setup Automation
+
 - [ ] **Hook Install/Uninstall**: Create `make install-hooks` and `make uninstall-hooks` commands
   - Automatically backup existing `~/.claude/settings.json`
   - Create `~/.claude/settings.json` if not exists
@@ -147,6 +151,7 @@ tmux send-keys -t claude-session "claude" Enter
   - Hooks should be installed BEFORE starting the Claude
 
 ### Event Filtering
+
 - [ ] **tmux Session Filtering**: Only process hooks from the specific tmux session
   - Add session ID to hook payloads
   - Filter out hooks from other Claude instances
@@ -154,55 +159,51 @@ tmux send-keys -t claude-session "claude" Enter
   - Support multiple bots with different tmux sessions
 
 ### Enhanced Integration
+
 - [ ] **Smart Hook Detection**: Auto-detect if hooks are properly configured
   - Check `~/.claude/settings.json` on startup
   - Warn user if hooks are missing or misconfigured
   - Provide guided setup instructions
 
 ### Tool Usage Transparency
+
 - [x] **Evidence-Based Tool Messages**: Scientific approach to tool transparency
   - ✅ **Bash**: `💻 **Bash:** docker ps - Show running Docker containers`
   - ✅ **LS**: `📂 **Listing:** /home/abc/Sync/Work/gifts`
   - ✅ **Edit**: `✏️ **Editing:** /path/to/file - replacing: old text...`
   - ✅ **TodoWrite**: `📝 **Managing todos:** 4 items`
   - 🔧 **Unknown tools**: Generic display until verified
-  
 - [ ] **Adding New Tools (Future)**: How to add support for new tools scientifically
   1. **Trigger the tool** - Use Claude Code to execute the new tool
   2. **Check logs** - Look for `tool_input_full` in `telegram-claude-bot.log`
   3. **Extract structure** - Find the exact parameter names and types
   4. **Update code** - Add verified parameters to `src/claude/conversation_monitor.py`
   5. **Test** - Verify the new tool shows detailed information
-  
+
   Example verification command:
+
   ```bash
   grep -A 1 '"tool_name": "NewTool"' telegram-claude-bot.log | grep "tool_input_full"
   ```
 
 ### Interactive Permission Handling
+
 - [ ] **Claude Permission Requests**: Handle Claude's permission/confirmation prompts
   - Detect when Claude asks for user confirmation
   - Send Telegram inline keyboard buttons for 1,2,3 responses
   - Forward user selections back to Claude automatically
   - Show clear context of what Claude is asking permission for
 
-### Code Formatting & Quality
-- [ ] **Python Code Formatting**: Set up automated code formatting
-  - Add `black` for consistent Python code formatting
-  - Add `isort` for import sorting
-  - Add `flake8` or `ruff` for linting
-  - Create `make format` and `make lint` commands
-  - Add pre-commit hooks for automatic formatting
-  - Configure formatting rules in `pyproject.toml`
-
 ### Makefile Enhancements
+
 - [ ] **Integrated Workflow**: Streamline the entire setup process
   - `make setup-full`: Install hooks + dependencies + validate configuration
   - `make start-claude`: Start Claude in tmux automatically
   - `make status`: Check tmux session, hooks, and bot status
   - `make logs`: Tail bot logs with filtering
-  - `make format`: Format all Python files
-  - `make lint`: Run linting checks
+  - ✅ `make format`: Format all Python files
+  - ✅ `make lint`: Run linting checks
+  - ✅ `make format-check`: Check if files are properly formatted
 
 ## License
 

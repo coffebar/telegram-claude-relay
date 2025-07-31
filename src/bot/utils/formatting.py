@@ -1,6 +1,7 @@
 """Format bot responses for optimal display."""
 
 import re
+
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -194,7 +195,6 @@ class ResponseFormatter:
         lines = text.split("\n")
         current_section = {"type": "text", "content": "", "start_line": 0}
         in_code_block = False
-        code_start = 0
 
         for i, line in enumerate(lines):
             # Check for code block markers
@@ -204,7 +204,6 @@ class ResponseFormatter:
                     if current_section["content"].strip():
                         sections.append(current_section)
                     in_code_block = True
-                    code_start = i
                     current_section = {
                         "type": "code_block",
                         "content": line + "\n",
@@ -426,7 +425,7 @@ class ResponseFormatter:
         """Clean text for Telegram display."""
         # Remove excessive whitespace
         text = re.sub(r"\n{3,}", "\n\n", text)
-        
+
         return text.strip()
 
     def _format_code_blocks(self, text: str) -> str:
@@ -529,61 +528,6 @@ class ResponseFormatter:
             messages.append(FormattedMessage("\n".join(current_lines)))
 
         return messages
-
-    def _get_quick_actions_keyboard(self) -> InlineKeyboardMarkup:
-        """Get quick actions inline keyboard."""
-        keyboard = [
-            [
-                InlineKeyboardButton("🧪 Test", callback_data="quick:test"),
-                InlineKeyboardButton("📦 Install", callback_data="quick:install"),
-                InlineKeyboardButton("🎨 Format", callback_data="quick:format"),
-            ],
-            [
-                InlineKeyboardButton("🔍 Find TODOs", callback_data="quick:find_todos"),
-                InlineKeyboardButton("🔨 Build", callback_data="quick:build"),
-                InlineKeyboardButton("📊 Git Status", callback_data="quick:git_status"),
-            ],
-        ]
-
-        # return InlineKeyboardMarkup(keyboard)  # Commented out to remove buttons
-        return None
-
-    def create_confirmation_keyboard(
-        self, confirm_data: str, cancel_data: str = "confirm:no"
-    ) -> InlineKeyboardMarkup:
-        """Create a confirmation keyboard."""
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Yes", callback_data=confirm_data),
-                InlineKeyboardButton("❌ No", callback_data=cancel_data),
-            ]
-        ]
-        # return InlineKeyboardMarkup(keyboard)  # Commented out to remove buttons
-        return None
-
-    def create_navigation_keyboard(self, options: List[tuple]) -> InlineKeyboardMarkup:
-        """Create navigation keyboard from options list.
-
-        Args:
-            options: List of (text, callback_data) tuples
-        """
-        keyboard = []
-        current_row = []
-
-        for text, callback_data in options:
-            current_row.append(InlineKeyboardButton(text, callback_data=callback_data))
-
-            # Create rows of 2 buttons
-            if len(current_row) == 2:
-                keyboard.append(current_row)
-                current_row = []
-
-        # Add remaining button if any
-        if current_row:
-            keyboard.append(current_row)
-
-        # return InlineKeyboardMarkup(keyboard)  # Commented out to remove buttons
-        return None
 
 
 class ProgressIndicator:

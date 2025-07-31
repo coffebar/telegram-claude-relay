@@ -1,8 +1,10 @@
 """Command handlers for bot operations."""
 
 import structlog
+
 from telegram import Update
 from telegram.ext import ContextTypes
+
 
 ENABLE_BUTTONS = False
 
@@ -37,4 +39,3 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Log command
     logger.info("Start command executed", user_id=user.id)
-

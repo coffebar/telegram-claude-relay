@@ -8,6 +8,7 @@ Features:
 """
 
 import asyncio
+
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -16,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple
 import structlog
 
 from ..config.settings import Settings
+
 
 logger = structlog.get_logger()
 
@@ -103,9 +105,7 @@ class RateLimiter:
             # Consume tokens
             self._consume_request_tokens(user_id, tokens)
 
-            logger.debug(
-                "Rate limit check passed", user_id=user_id, tokens=tokens
-            )
+            logger.debug("Rate limit check passed", user_id=user_id, tokens=tokens)
             return True, None
 
     def _check_request_rate(
@@ -127,12 +127,10 @@ class RateLimiter:
         )
         return False, message
 
-
     def _consume_request_tokens(self, user_id: int, tokens: int) -> None:
         """Consume tokens from request bucket."""
         bucket = self._get_or_create_bucket(user_id)
         bucket.consume(tokens)
-
 
     def _get_or_create_bucket(self, user_id: int) -> RateLimitBucket:
         """Get or create rate limit bucket for user."""
@@ -146,7 +144,6 @@ class RateLimiter:
             logger.debug("Created rate limit bucket", user_id=user_id)
 
         return self.request_buckets[user_id]
-
 
     async def reset_user_limits(self, user_id: int) -> None:
         """Reset limits for a user (admin function)."""

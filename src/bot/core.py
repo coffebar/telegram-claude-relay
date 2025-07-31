@@ -9,9 +9,11 @@ Features:
 """
 
 import asyncio
+
 from typing import Any, Callable, Dict, Optional
 
 import structlog
+
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -23,6 +25,7 @@ from telegram.ext import (
 
 from ..config.settings import Settings
 from ..exceptions import ClaudeCodeTelegramError
+
 
 logger = structlog.get_logger()
 
@@ -52,7 +55,6 @@ class ClaudeCodeBot:
         builder.pool_timeout(30)
 
         self.app = builder.build()
-
 
         # Set bot commands for menu
         await self._set_bot_commands()
@@ -93,8 +95,6 @@ class ClaudeCodeBot:
             ),
             group=10,
         )
-
-
 
         logger.info("Bot handlers registered")
 
@@ -220,7 +220,6 @@ class ClaudeCodeBot:
         try:
             self.is_running = False  # Stop the main loop first
 
-
             if self.app:
                 # Stop the updater if it's running
                 if self.app.updater.running:
@@ -279,10 +278,12 @@ class ClaudeCodeBot:
 
         # Log system error details
         if update and update.effective_user:
-            logger.error("System error for user", 
-                        user_id=update.effective_user.id,
-                        error_type=error_type.__name__,
-                        error_message=str(error))
+            logger.error(
+                "System error for user",
+                user_id=update.effective_user.id,
+                error_type=error_type.__name__,
+                error_message=str(error),
+            )
 
     async def get_bot_info(self) -> Dict[str, Any]:
         """Get bot information."""

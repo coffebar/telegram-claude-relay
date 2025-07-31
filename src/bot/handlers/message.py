@@ -3,17 +3,20 @@
 from typing import Optional
 
 import structlog
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from ...claude.exceptions import ClaudeToolValidationError
-from ...config.settings import Settings
 from ...security.rate_limiter import RateLimiter
+
 
 logger = structlog.get_logger()
 
 
-async def _safe_reply_text(update, text, parse_mode=None, reply_markup=None, reply_to_message_id=None):
+async def _safe_reply_text(
+    update, text, parse_mode=None, reply_markup=None, reply_to_message_id=None
+):
     """Send message with markdown fallback to plain text if parsing fails."""
     try:
         await update.message.reply_text(
@@ -24,8 +27,12 @@ async def _safe_reply_text(update, text, parse_mode=None, reply_markup=None, rep
         )
     except Exception as e:
         # If markdown parsing failed, try sending as plain text
-        if parse_mode and ("parse entities" in str(e).lower() or "can't parse" in str(e).lower()):
-            logger.warning("Markdown parsing failed, retrying as plain text", error=str(e))
+        if parse_mode and (
+            "parse entities" in str(e).lower() or "can't parse" in str(e).lower()
+        ):
+            logger.warning(
+                "Markdown parsing failed, retrying as plain text", error=str(e)
+            )
             try:
                 await update.message.reply_text(
                     text,
@@ -116,30 +123,30 @@ def _format_error_message(error_str: str) -> str:
         return error_str
     elif "no conversation found" in error_str.lower():
         return (
-            f"🔄 **Session Not Found**\n\n"
-            f"The Claude session could not be found or has expired.\n\n"
-            f"**What you can do:**\n"
-            f"• Use `/new` to start a fresh session\n"
-            f"• Try your request again\n"
-            f"• Use `/status` to check your current session"
+            "🔄 **Session Not Found**\n\n"
+            "The Claude session could not be found or has expired.\n\n"
+            "**What you can do:**\n"
+            "• Use `/new` to start a fresh session\n"
+            "• Try your request again\n"
+            "• Use `/status` to check your current session"
         )
     elif "rate limit" in error_str.lower():
         return (
-            f"⏱️ **Rate Limit Reached**\n\n"
-            f"Too many requests in a short time period.\n\n"
-            f"**What you can do:**\n"
-            f"• Wait a moment before trying again\n"
-            f"• Use simpler requests\n"
-            f"• Check your current usage with `/status`"
+            "⏱️ **Rate Limit Reached**\n\n"
+            "Too many requests in a short time period.\n\n"
+            "**What you can do:**\n"
+            "• Wait a moment before trying again\n"
+            "• Use simpler requests\n"
+            "• Check your current usage with `/status`"
         )
     elif "timeout" in error_str.lower():
         return (
-            f"⏰ **Request Timeout**\n\n"
-            f"Your request took too long to process and timed out.\n\n"
-            f"**What you can do:**\n"
-            f"• Try breaking down your request into smaller parts\n"
-            f"• Use simpler commands\n"
-            f"• Try again in a moment"
+            "⏰ **Request Timeout**\n\n"
+            "Your request took too long to process and timed out.\n\n"
+            "**What you can do:**\n"
+            "• Try breaking down your request into smaller parts\n"
+            "• Use simpler commands\n"
+            "• Try again in a moment"
         )
     else:
         # Generic error handling
@@ -156,7 +163,6 @@ async def handle_text_message(
     """Handle regular text messages as Claude prompts."""
     user_id = update.effective_user.id
     message_text = update.message.text
-    settings: Settings = context.bot_data["settings"]
 
     # Get services
     rate_limiter: Optional[RateLimiter] = context.bot_data.get("rate_limiter")
@@ -168,9 +174,7 @@ async def handle_text_message(
     try:
         # Check rate limit
         if rate_limiter:
-            allowed, limit_message = await rate_limiter.check_rate_limit(
-                user_id
-            )
+            allowed, limit_message = await rate_limiter.check_rate_limit(user_id)
             if not allowed:
                 await update.message.reply_text(f"⏱️ {limit_message}")
                 return
@@ -202,16 +206,19 @@ async def handle_text_message(
             )
             return
 
-
         # Enhanced stream updates handler with progress tracking
         async def stream_handler(update_obj):
             try:
                 progress_text = await _format_progress_update(update_obj)
                 if progress_text:
                     try:
-                        await progress_msg.edit_text(progress_text, parse_mode="Markdown")
+                        await progress_msg.edit_text(
+                            progress_text, parse_mode="Markdown"
+                        )
                     except Exception as edit_error:
-                        logger.warning("Failed to edit progress message", error=str(edit_error))
+                        logger.warning(
+                            "Failed to edit progress message", error=str(edit_error)
+                        )
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
 
@@ -237,16 +244,23 @@ async def handle_text_message(
                     logger.warning("Failed to log interaction to storage", error=str(e))
 
             # Hook monitoring handles all response formatting and sending
-            logger.info("Claude command sent - response will be delivered via hook monitoring", user_id=user_id)
-            
+            logger.info(
+                "Claude command sent - response will be delivered via hook monitoring",
+                user_id=user_id,
+            )
+
             # Delete progress message (hook will send the actual response)
             try:
                 await progress_msg.delete()
             except Exception as delete_error:
-                logger.warning("Failed to delete progress message", error=str(delete_error))
-            
-            
-            logger.info("Text message processed successfully - hook monitoring will deliver response", user_id=user_id)
+                logger.warning(
+                    "Failed to delete progress message", error=str(delete_error)
+                )
+
+            logger.info(
+                "Text message processed successfully - hook monitoring will deliver response",
+                user_id=user_id,
+            )
             return
 
         except ClaudeToolValidationError as e:
@@ -257,28 +271,31 @@ async def handle_text_message(
                 user_id=user_id,
                 blocked_tools=e.blocked_tools,
             )
-            
+
             # Delete progress message and send error
             try:
                 await progress_msg.delete()
             except Exception as delete_error:
-                logger.warning("Failed to delete progress message", error=str(delete_error))
+                logger.warning(
+                    "Failed to delete progress message", error=str(delete_error)
+                )
             await _safe_reply_text(
                 update,
                 str(e),
                 parse_mode="Markdown",
                 reply_to_message_id=update.message.message_id,
             )
-            
-            
+
         except Exception as e:
             logger.error("Claude integration failed", error=str(e), user_id=user_id)
-            
+
             # Delete progress message and send error
             try:
                 await progress_msg.delete()
             except Exception as delete_error:
-                logger.warning("Failed to delete progress message", error=str(delete_error))
+                logger.warning(
+                    "Failed to delete progress message", error=str(delete_error)
+                )
             error_message = _format_error_message(str(e))
             await _safe_reply_text(
                 update,
@@ -286,27 +303,18 @@ async def handle_text_message(
                 parse_mode="Markdown",
                 reply_to_message_id=update.message.message_id,
             )
-            
 
     except Exception as e:
         # Clean up progress message if it exists
         try:
             await progress_msg.delete()
         except Exception as delete_error:
-            logger.warning("Failed to delete progress message in exception handler", error=str(delete_error))
+            logger.warning(
+                "Failed to delete progress message in exception handler",
+                error=str(delete_error),
+            )
 
         error_msg = f"❌ **Error processing message**\n\n{str(e)}"
         await _safe_reply_text(update, error_msg, parse_mode="Markdown")
 
-
         logger.error("Error processing text message", error=str(e), user_id=user_id)
-
-
-
-
-
-
-
-
-
-

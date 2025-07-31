@@ -8,7 +8,6 @@ Features:
 - Environment-specific settings
 """
 
-from pathlib import Path
 from typing import Any, List, Optional
 
 from pydantic import Field, SecretStr, field_validator, model_validator
@@ -61,10 +60,10 @@ class Settings(BaseSettings):
     # Storage (in-memory only for tmux mode)
     # Database settings removed - using in-memory storage only
 
-
     # tmux Integration
     pane: Optional[str] = Field(
-        None, description="tmux pane target (session:window.pane format). Leave empty for auto-discovery."
+        None,
+        description="tmux pane target (session:window.pane format). Leave empty for auto-discovery.",
     )
 
     # Monitoring
@@ -80,7 +79,6 @@ class Settings(BaseSettings):
     webhook_url: Optional[str] = Field(None, description="Webhook URL for bot")
     webhook_port: int = Field(8443, description="Webhook port")
     webhook_path: str = Field("/webhook", description="Webhook path")
-    
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
@@ -93,8 +91,6 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
         return v  # type: ignore[no-any-return]
-
-
 
     @field_validator("log_level")
     @classmethod
@@ -113,8 +109,6 @@ class Settings(BaseSettings):
             raise ValueError(
                 "auth_token_secret required when enable_token_auth is True"
             )
-
-
 
         return self
 

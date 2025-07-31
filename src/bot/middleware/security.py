@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict
 
 import structlog
 
+
 logger = structlog.get_logger()
 
 
@@ -32,9 +33,7 @@ async def security_middleware(
     # Validate text content if present
     message = event.effective_message
     if message and message.text:
-        is_safe, violation_type = await validate_message_content(
-            message.text, user_id
-        )
+        is_safe, violation_type = await validate_message_content(message.text, user_id)
         if not is_safe:
             await message.reply_text(
                 f"🛡️ **Security Alert**\n\n"
@@ -59,9 +58,7 @@ async def security_middleware(
     return await handler(event, data)
 
 
-async def validate_message_content(
-    text: str, user_id: int
-) -> tuple[bool, str]:
+async def validate_message_content(text: str, user_id: int) -> tuple[bool, str]:
     """Validate message text content for security threats."""
 
     # Check for command injection patterns
@@ -146,7 +143,6 @@ async def threat_detection_middleware(
     user_id = event.effective_user.id if event.effective_user else None
     if not user_id:
         return await handler(event, data)
-
 
     # Track user behavior patterns
     user_behavior = data.setdefault("user_behavior", {})

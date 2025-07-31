@@ -1,9 +1,9 @@
 """Telegram bot authentication middleware."""
 
-from datetime import datetime
 from typing import Any, Callable, Dict
 
 import structlog
+
 
 logger = structlog.get_logger()
 

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import signal
 import sys
+
 from pathlib import Path
 from typing import Any, Dict
 
@@ -12,43 +13,40 @@ import structlog
 
 from src import __version__
 from src.bot.core import ClaudeCodeBot
-from src.claude import (
-    ClaudeIntegration,
-)
-from src.config.loader import load_config
+from src.claude import ClaudeIntegration
 from src.config.settings import Settings
 from src.exceptions import ConfigurationError
-from src.security.auth import (
-    AuthenticationManager,
-    WhitelistAuthProvider,
-)
+from src.security.auth import AuthenticationManager, WhitelistAuthProvider
 from src.security.rate_limiter import RateLimiter
 
 
-def setup_logging(debug: bool = False, log_file: str = "telegram-claude-bot.log") -> None:
+def setup_logging(
+    debug: bool = False, log_file: str = "telegram-claude-bot.log"
+) -> None:
     """Configure structured logging with both console and file output."""
     level = logging.DEBUG if debug else logging.INFO
 
     # Configure standard logging with both console and file handlers
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
-    
+
     # Clear existing handlers
     root_logger.handlers = []
-    
+
     # Console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
     console_handler.setFormatter(logging.Formatter("%(message)s"))
     root_logger.addHandler(console_handler)
-    
+
     # File handler with rotation
     from logging.handlers import RotatingFileHandler
+
     file_handler = RotatingFileHandler(
         filename=log_file,
         maxBytes=10 * 1024 * 1024,  # 10MB
         backupCount=5,
-        encoding='utf-8'
+        encoding="utf-8",
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(logging.Formatter("%(message)s"))
@@ -103,10 +101,8 @@ async def create_application(config: Settings) -> Dict[str, Any]:
 
     if not config.allowed_users:
         raise ConfigurationError("ALLOWED_USERS must be configured for security")
-    
-    auth_manager = AuthenticationManager([
-        WhitelistAuthProvider(config.allowed_users)
-    ])
+
+    auth_manager = AuthenticationManager([WhitelistAuthProvider(config.allowed_users)])
     rate_limiter = RateLimiter(config)
 
     logger.info("Using tmux integration only")
@@ -158,32 +154,34 @@ async def run_application(app: Dict[str, Any]) -> None:
         # Start Unix socket server (required for Claude response monitoring)
         socket_task = None
         webhook_handler = None
-        
+
         logger.info("Preparing Unix socket server for Claude conversation monitoring")
-        from src.claude.unix_socket_server import UnixSocketServer
-        from src.claude.conversation_monitor import ConversationMonitor
         from src.bot.handlers.webhook import ConversationWebhookHandler
+        from src.claude.conversation_monitor import ConversationMonitor
+        from src.claude.unix_socket_server import UnixSocketServer
 
         # Run bot in background task
         bot_task = asyncio.create_task(bot.start())
         shutdown_task = asyncio.create_task(shutdown_event.wait())
-        
+
         # Wait a moment for bot initialization
         await asyncio.sleep(0.5)
-        
+
         # Start the socket server (required for Claude response handling)
         if bot.app and bot.app.bot:
             # Create webhook handler and monitor
             webhook_handler = ConversationWebhookHandler(bot.app.bot, config)
-            
+
             # Add webhook handler to bot dependencies
             bot.app.bot_data["webhook_handler"] = webhook_handler
-            
+
             # Initialize subscriptions for all allowed users
             await webhook_handler.initialize_subscriptions()
-            
-            monitor = ConversationMonitor(config, webhook_handler.handle_conversation_update)
-            
+
+            monitor = ConversationMonitor(
+                config, webhook_handler.handle_conversation_update
+            )
+
             # Start Unix socket server
             socket_server = UnixSocketServer(config, monitor)
             socket_task = asyncio.create_task(socket_server.start())
@@ -193,10 +191,8 @@ async def run_application(app: Dict[str, Any]) -> None:
         tasks = [bot_task, shutdown_task]
         if socket_task:
             tasks.append(socket_task)
-            
-        done, pending = await asyncio.wait(
-            tasks, return_when=asyncio.FIRST_COMPLETED
-        )
+
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
 
         # Cancel remaining tasks
         for task in pending:
@@ -225,14 +221,16 @@ async def run_application(app: Dict[str, Any]) -> None:
 async def main() -> None:
     """Main application entry point."""
     args = parse_args()
-    
+
     # Setup logging with file output
     log_file = "telegram-claude-bot.log"
     setup_logging(debug=args.debug, log_file=log_file)
 
     logger = structlog.get_logger()
     logger.info("=" * 80)
-    logger.info("Starting Claude Code Telegram Bot", version=__version__, log_file=log_file)
+    logger.info(
+        "Starting Claude Code Telegram Bot", version=__version__, log_file=log_file
+    )
 
     try:
         # Load configuration

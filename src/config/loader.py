@@ -1,15 +1,18 @@
 """Simple configuration loading."""
 
 import os
+
 from pathlib import Path
 from typing import Optional
 
 import structlog
+
 from dotenv import load_dotenv
 
 from src.exceptions import ConfigurationError
 
 from .settings import Settings
+
 
 logger = structlog.get_logger()
 

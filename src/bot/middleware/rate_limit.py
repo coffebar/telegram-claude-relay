@@ -4,6 +4,7 @@ from typing import Any, Callable, Dict
 
 import structlog
 
+
 logger = structlog.get_logger()
 
 
@@ -50,7 +51,6 @@ async def rate_limit_middleware(
             message=message,
         )
 
-
         # Send user-friendly rate limit message
         if event.effective_message:
             await event.effective_message.reply_text(f"⏱️ {message}")
@@ -65,10 +65,6 @@ async def rate_limit_middleware(
 
     # Continue to handler
     return await handler(event, data)
-
-
-
-
 
 
 async def burst_protection_middleware(

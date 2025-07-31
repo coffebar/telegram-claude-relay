@@ -9,6 +9,7 @@ from ..config.settings import Settings
 from .responses import ClaudeResponse, StreamUpdate
 from .tmux_integration import TmuxClaudeIntegration
 
+
 logger = structlog.get_logger()
 
 
@@ -29,13 +30,14 @@ class ClaudeIntegration:
         """Get tmux pane target, using auto-discovery if not configured."""
         if self._pane_target:
             return self._pane_target
-            
+
         if self.config.pane and self.config.pane.strip():
             self._pane_target = self.config.pane.strip()
             logger.info("Using configured tmux pane", pane=self._pane_target)
             return self._pane_target
-        
+
         from src.tmux.client import TmuxClient
+
         self._pane_target = await TmuxClient.discover_claude_pane()
         logger.info("Auto-discovered claude pane", pane=self._pane_target)
         return self._pane_target
@@ -44,10 +46,11 @@ class ClaudeIntegration:
         """Ensure tmux integration is initialized with correct pane."""
         if not self.tmux_integration:
             from src.tmux.client import TmuxClient
+
             pane_target = await self._get_pane_target()
             tmux_client = TmuxClient(pane_target)
             self.tmux_integration = TmuxClaudeIntegration(self.config, tmux_client)
-        
+
         self.manager = self.tmux_integration
 
     async def run_command(
@@ -64,7 +67,7 @@ class ClaudeIntegration:
         await self._ensure_tmux_integration()
 
         working_dir = working_directory or Path.cwd()
-        
+
         return await self._execute_with_fallback(
             prompt=prompt,
             working_directory=working_dir,
