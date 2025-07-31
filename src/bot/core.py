@@ -17,6 +17,7 @@ import structlog
 from telegram import Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -96,6 +97,11 @@ class ClaudeCodeBot:
             group=10,
         )
 
+        # Add callback query handler for permission dialogs
+        self.app.add_handler(
+            CallbackQueryHandler(self._inject_deps(self._handle_callback_query))
+        )
+
         logger.info("Bot handlers registered")
 
     def _inject_deps(self, handler: Callable) -> Callable:
@@ -112,6 +118,28 @@ class ClaudeCodeBot:
             return await handler(update, context)
 
         return wrapped
+
+    async def _handle_callback_query(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
+        """Handle callback queries (inline keyboard button presses)."""
+        callback_query = update.callback_query
+
+        if not callback_query:
+            return
+
+        # Check if this is a permission dialog callback
+        if callback_query.data and callback_query.data.startswith("perm_"):
+            webhook_handler = context.bot_data.get("webhook_handler")
+            if webhook_handler:
+                await webhook_handler.handle_permission_callback(
+                    callback_query, context
+                )
+            else:
+                await callback_query.answer("Webhook handler not available.")
+        else:
+            # Handle other types of callbacks if needed
+            await callback_query.answer("Unknown callback.")
 
     def _add_middleware(self) -> None:
         """Add middleware to application."""

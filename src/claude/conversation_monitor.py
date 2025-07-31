@@ -267,14 +267,153 @@ class ConversationMonitor:
         except Exception as e:
             logger.error("Error sending hook notification", error=str(e))
 
+    async def send_permission_dialog(self, dialog_data: Dict[str, Any]) -> None:
+        """Send permission dialog notification to Telegram with interactive buttons."""
+        if not self.message_callback:
+            return
+
+        try:
+            context = dialog_data.get("context", {})
+            message = dialog_data.get("message", "")
+
+            # Build context-aware question
+            question = self._build_permission_question(message, context)
+
+            payload = {
+                "session_id": dialog_data.get("session_id", "unknown"),
+                "message": {
+                    "type": "permission_dialog",
+                    "role": "system",
+                    "content": question,
+                    "options": ["Allow", "Allow and don't ask again", "Deny"],
+                    "timestamp": dialog_data.get(
+                        "timestamp", datetime.now().isoformat()
+                    ),
+                    "dialog_id": f"dialog_{datetime.now().timestamp()}",
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            await self.message_callback(payload)
+
+        except Exception as e:
+            logger.error("Error sending permission dialog", error=str(e))
+
+    def _build_permission_question(self, message: str, context: Dict[str, Any]) -> str:
+        """Build a context-aware permission question for the user."""
+        base_message = message or "Claude needs your permission"
+
+        if not context:
+            return f"🔐 **Permission Required**\n\n{base_message}"
+
+        tool_use = context.get("tool_use")
+        file_path = context.get("file_path", "")
+        code_snippet = context.get("code_snippet", "")
+        new_code = context.get("new_code", "")
+
+        # Detect programming language from file extension
+        lang = self._detect_language(file_path)
+
+        # Build detailed question based on context
+        if tool_use == "Edit":
+            question = f"🔐 **Permission Required**\n\n{base_message}"
+            if file_path:
+                question += f"\n\n📂 **File:** `{file_path}`"
+            if code_snippet:
+                # Show full code snippet, no truncation
+                question += f"\n\n**Code to replace:**\n```{lang}\n{code_snippet}\n```"
+            if new_code:
+                # Show full new code, no truncation
+                question += f"\n\n**New code:**\n```{lang}\n{new_code}\n```"
+
+        elif tool_use == "Write":
+            question = f"🔐 **Permission Required**\n\n{base_message}"
+            if file_path:
+                question += f"\n\n📂 **File:** `{file_path}`"
+            if code_snippet:
+                # Show full content, no truncation
+                question += f"\n\n**Content to write:**\n```{lang}\n{code_snippet}\n```"
+
+        elif tool_use == "Bash":
+            question = f"🔐 **Permission Required**\n\n{base_message}"
+            if code_snippet:
+                # Show full command in code block
+                question += f"\n\n**Command to execute:**\n```bash\n{code_snippet}\n```"
+
+        else:
+            question = f"🔐 **Permission Required**\n\n{base_message}"
+            if file_path:
+                question += f"\n\n📂 **File:** `{file_path}`"
+
+        return question
+
+    def _detect_language(self, file_path: str) -> str:
+        """Detect programming language from file extension for syntax highlighting."""
+        if not file_path:
+            return ""
+
+        # Map common file extensions to Telegram-supported language identifiers
+        extension_map = {
+            ".py": "python",
+            ".js": "javascript",
+            ".ts": "typescript",
+            ".jsx": "jsx",
+            ".tsx": "tsx",
+            ".java": "java",
+            ".c": "c",
+            ".cpp": "cpp",
+            ".cc": "cpp",
+            ".cxx": "cpp",
+            ".h": "c",
+            ".hpp": "cpp",
+            ".cs": "csharp",
+            ".go": "go",
+            ".rs": "rust",
+            ".php": "php",
+            ".rb": "ruby",
+            ".sh": "bash",
+            ".bash": "bash",
+            ".zsh": "bash",
+            ".fish": "bash",
+            ".ps1": "powershell",
+            ".sql": "sql",
+            ".html": "html",
+            ".css": "css",
+            ".scss": "scss",
+            ".sass": "sass",
+            ".json": "json",
+            ".xml": "xml",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".toml": "toml",
+            ".ini": "ini",
+            ".cfg": "ini",
+            ".conf": "ini",
+            ".md": "markdown",
+            ".markdown": "markdown",
+            ".dockerfile": "dockerfile",
+            ".makefile": "makefile",
+            ".mk": "makefile",
+        }
+
+        # Get file extension
+        import os
+
+        _, ext = os.path.splitext(file_path.lower())
+
+        # Special cases for files without extensions
+        filename = os.path.basename(file_path.lower())
+        if filename in ["dockerfile", "makefile", "vagrantfile", "jenkinsfile"]:
+            return filename
+
+        return extension_map.get(ext, "")
+
     def _format_hook_notification(self, notification: Dict[str, Any]) -> Optional[str]:
         """Format hook notification for display."""
         notif_type = notification.get("type")
 
         if notif_type == "user_prompt":
             prompt = notification.get("prompt", "")
-            if len(prompt) > 200:
-                prompt = prompt[:200] + "..."
             return f"💬 **New Prompt:**\n```\n{prompt}\n```"
 
         elif notif_type == "pre_tool_use":
@@ -286,10 +425,13 @@ class ConversationMonitor:
                 # VERIFIED: {"command": "docker ps", "description": "Show running Docker containers"}
                 command = params.get("command", "")
                 description = params.get("description", "")
-                if len(command) > 80:
-                    command = command[:80] + "..."
-                desc_text = f" - {description}" if description else ""
-                return f"💻 **Bash:** `{command}`{desc_text}"
+
+                # Format with full command in code block
+                message = "💻 **Bash**"
+                if description:
+                    message += f" - {description}"
+                message += f"\n```bash\n{command}\n```"
+                return message
 
             elif tool_name == "LS":
                 # VERIFIED: {"path": "/home/..."}
@@ -300,10 +442,23 @@ class ConversationMonitor:
                 # VERIFIED: {"file_path": "/path/to/file", "old_string": "...", "new_string": "..."}
                 file_path = params.get("file_path", "")
                 old_string = params.get("old_string", "")
-                if old_string and len(old_string) > 50:
-                    old_string = old_string[:50] + "..."
-                replace_text = f" - replacing: `{old_string}`" if old_string else ""
-                return f"✏️ **Editing:** `{file_path}`{replace_text}"
+                new_string = params.get("new_string", "")
+
+                # Get file language for syntax highlighting
+                lang = self._get_file_language(file_path)
+
+                # Format the code changes
+                message = f"✏️ **Editing:** `{file_path}`\n"
+
+                # Show full old code
+                if old_string:
+                    message += f"\n**Removing:**\n```{lang}\n{old_string}\n```\n"
+
+                # Show full new code
+                if new_string:
+                    message += f"\n**Adding:**\n```{lang}\n{new_string}\n```"
+
+                return message
 
             elif tool_name == "TodoWrite":
                 # VERIFIED: {"todos": [{"content": "...", "status": "...", "priority": "...", "id": "..."}]}
@@ -318,29 +473,41 @@ class ConversationMonitor:
                 limit = params.get("limit")
                 range_text = ""
                 if offset is not None or limit is not None:
-                    range_text = (
-                        f" (lines {offset or 0}-{(offset or 0) + (limit or 'end')})"
-                    )
+                    start = offset or 0
+                    if limit is not None:
+                        end = start + limit
+                        range_text = f" (lines {start}-{end})"
+                    else:
+                        range_text = f" (from line {start})"
                 return f"📖 **Reading:** `{file_path}`{range_text}"
 
             elif tool_name == "Write":
                 # VERIFIED: {"file_path": "/path/to/file", "content": "..."}
                 file_path = params.get("file_path", "")
                 content = params.get("content", "")
-                size_text = f" ({len(content)} chars)" if content else ""
-                return f"✍️ **Writing:** `{file_path}`{size_text}"
+
+                # Get file language for syntax highlighting
+                lang = self._get_file_language(file_path)
+
+                # Format the message with full content
+                message = f"✍️ **Writing:** `{file_path}`\n"
+                if content:
+                    message += f"\n**Content:**\n```{lang}\n{content}\n```"
+
+                return message
 
             elif tool_name == "Grep":
                 # VERIFIED: {"pattern": "search_pattern", "path": "/path", "output_mode": "content"}
                 pattern = params.get("pattern", "")
                 path = params.get("path", "")
                 output_mode = params.get("output_mode", "files_with_matches")
-                if len(pattern) > 50:
-                    pattern = pattern[:50] + "..."
-                mode_text = (
-                    f" ({output_mode})" if output_mode != "files_with_matches" else ""
-                )
-                return f"🔍 **Searching:** `{pattern}` in `{path}`{mode_text}"
+
+                # Format with full pattern in code block
+                message = f"🔍 **Searching in:** `{path}`"
+                if output_mode != "files_with_matches":
+                    message += f" ({output_mode})"
+                message += f"\n```regex\n{pattern}\n```"
+                return message
 
             elif tool_name == "Glob":
                 # VERIFIED: {"pattern": "*requirements*.txt"}
@@ -351,15 +518,32 @@ class ConversationMonitor:
                 # VERIFIED: {"file_path": "/path/to/file", "edits": [{"old_string": "...", "new_string": "..."}]}
                 file_path = params.get("file_path", "")
                 edits = params.get("edits", [])
-                edit_count = len(edits)
-                return f"✏️ **Multi-editing:** `{file_path}` ({edit_count} changes)"
+
+                # Get file language for syntax highlighting
+                lang = self._get_file_language(file_path)
+
+                # Format the message
+                message = f"✏️ **Multi-editing:** `{file_path}` ({len(edits)} changes)\n"
+
+                # Show all edits
+                for i, edit in enumerate(edits, 1):
+                    old_string = edit.get("old_string", "")
+                    new_string = edit.get("new_string", "")
+
+                    message += f"\n**Edit {i}:**"
+                    if old_string:
+                        message += f"\n**Removing:**\n```{lang}\n{old_string}\n```"
+                    if new_string:
+                        message += f"\n**Adding:**\n```{lang}\n{new_string}\n```"
+                    if i < len(edits):
+                        message += "\n"
+
+                return message
 
             elif tool_name == "WebSearch":
                 # VERIFIED: {"query": "search terms"}
                 query = params.get("query", "")
-                if len(query) > 60:
-                    query = query[:60] + "..."
-                return f"🌐 **Web Search:** `{query}`"
+                return f"🌐 **Web Search:**\n```\n{query}\n```"
 
             else:
                 # Unknown/unverified tool - generic display

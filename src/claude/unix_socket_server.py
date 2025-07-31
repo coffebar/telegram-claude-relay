@@ -210,7 +210,192 @@ class UnixSocketServer:
 
             return {"continue": True}
 
+        elif hook_type == "Notification":
+            # Handle Claude notification events (including permission dialogs)
+            message = hook_data.get("message", "")
+            session_id = hook_data.get("session_id", "unknown")
+            transcript_path = hook_data.get("transcript_path", "")
+
+            logger.info(
+                "Processing Notification hook",
+                session_id=session_id,
+                message=message,
+                transcript_path=transcript_path,
+                full_data=hook_data,
+            )
+
+            # Check if this is a permission dialog
+            if self._is_permission_dialog(message):
+                logger.info("Detected permission dialog", message=message)
+
+                # Get context from transcript file instead of tmux
+                context = await self._get_permission_context_from_transcript(
+                    transcript_path
+                )
+
+                logger.info(
+                    "Permission context extracted",
+                    context=context,
+                    message=message,
+                    transcript_path=transcript_path,
+                )
+
+                # Send permission dialog notification
+                asyncio.create_task(
+                    self.monitor.send_permission_dialog(
+                        {
+                            "type": "permission_dialog",
+                            "session_id": session_id,
+                            "message": message,
+                            "context": context,
+                            "timestamp": hook_data.get("timestamp"),
+                        }
+                    )
+                )
+            else:
+                # Regular notification
+                asyncio.create_task(
+                    self.monitor.send_hook_notification(
+                        {
+                            "type": "notification",
+                            "session_id": session_id,
+                            "message": message,
+                            "timestamp": hook_data.get("timestamp"),
+                        }
+                    )
+                )
+
+            return {"continue": True}
+
         return {"status": "error", "message": f"Unknown hook type: {hook_type}"}
+
+    def _is_permission_dialog(self, message: str) -> bool:
+        """Check if a notification message indicates a permission dialog."""
+        permission_indicators = [
+            "needs your permission",
+            "needs permission to use",
+            "waiting for your input",
+            "requires permission",
+            "confirm",
+            "asking to edit",
+            "wants to edit",
+            "edit the file",
+            "update the file",
+            "modify the file",
+            "change the file",
+        ]
+
+        message_lower = message.lower()
+        return any(indicator in message_lower for indicator in permission_indicators)
+
+    async def _get_permission_context_from_transcript(
+        self, transcript_path: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get permission context from transcript file."""
+        try:
+            import json
+
+            from pathlib import Path
+
+            path = Path(transcript_path)
+            if not path.exists():
+                logger.warning("Transcript file not found", path=transcript_path)
+                return None
+
+            # Read the transcript file to get recent context
+            recent_messages = []
+
+            with open(path) as f:
+                for line in f:
+                    try:
+                        message = json.loads(line.strip())
+                        recent_messages.append(message)
+                    except json.JSONDecodeError:
+                        continue
+
+            # Look for the most recent assistant message that might contain the permission request context
+            # Permission requests usually come after Claude tries to use a tool
+            context_info = {
+                "tool_use": None,
+                "code_snippet": None,
+                "new_code": None,
+                "file_path": None,
+            }
+
+            # Check last few messages for context
+            for msg in reversed(recent_messages[-10:]):  # Last 10 messages
+                # Get the message content - it's nested in msg.message.content
+                message_data = msg.get("message", {})
+                content = message_data.get("content", "")
+
+                # Log the message structure for debugging
+                logger.debug(
+                    "Checking message for context",
+                    message_type=type(content),
+                    content_preview=str(content)[:100],
+                )
+
+                if isinstance(content, list):
+                    # Handle structured content
+                    for item in content:
+                        if isinstance(item, dict):
+                            if item.get("type") == "tool_use":
+                                tool_name = item.get("name", "")
+                                tool_input = item.get("input", {})
+
+                                logger.debug(
+                                    "Found tool_use",
+                                    tool_name=tool_name,
+                                    tool_input_keys=list(tool_input.keys()),
+                                )
+
+                                # Extract relevant context based on tool type
+                                if tool_name in ["Edit", "MultiEdit", "Write"]:
+                                    context_info["tool_use"] = tool_name
+                                    context_info["file_path"] = tool_input.get(
+                                        "file_path", ""
+                                    )
+
+                                    if tool_name == "Edit":
+                                        context_info["code_snippet"] = tool_input.get(
+                                            "old_string", ""
+                                        )
+                                        context_info["new_code"] = tool_input.get(
+                                            "new_string", ""
+                                        )
+                                    elif tool_name == "Write":
+                                        content = tool_input.get("content", "")
+                                        context_info["code_snippet"] = (
+                                            content  # Full content, no truncation
+                                        )
+                                        context_info["new_code"] = (
+                                            None  # Write doesn't have old/new, just content
+                                        )
+
+                                    return context_info  # Found relevant context
+
+                                elif tool_name == "Bash":
+                                    context_info["tool_use"] = tool_name
+                                    context_info["code_snippet"] = tool_input.get(
+                                        "command", ""
+                                    )
+                                    return context_info
+
+                elif isinstance(content, str):
+                    # Sometimes content might be a string with tool information
+                    if "tool_use" in content.lower():
+                        logger.debug(
+                            "Found string content with tool_use",
+                            content_preview=content[:200],
+                        )
+
+            return context_info if context_info["tool_use"] else None
+
+        except Exception as e:
+            logger.error(
+                "Error getting permission context from transcript", error=str(e)
+            )
+            return None
 
     async def stop(self):
         """Stop the server and cleanup."""

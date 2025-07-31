@@ -39,6 +39,16 @@
           }
         ]
       }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/pets/telegram-claude-relay/hooks/notification_hook.py"
+          }
+        ]
+      }
     ]
   }
 }

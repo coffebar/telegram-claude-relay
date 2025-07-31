@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import structlog
 
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
 from ...config.settings import Settings
@@ -102,6 +102,9 @@ class ConversationWebhookHandler:
             {}
         )  # user_id -> last prompt sent via Telegram
         self.message_tracker = MessageTracker()
+        self.permission_dialogs: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # dialog_id -> dialog info
 
     async def handle_conversation_update(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming conversation update from Claude hook."""
@@ -125,23 +128,32 @@ class ConversationWebhookHandler:
                 )
                 return {"status": "error", "message": "Missing required fields"}
 
-            # Format the message for Telegram
-            formatted_message = self._format_message(message)
-
-            if formatted_message:
+            # Check if this is a permission dialog
+            if message.get("type") == "permission_dialog":
                 logger.info(
-                    "Sending formatted message to Telegram",
+                    "Handling permission dialog",
                     session_id=session_id,
-                    msg_len=len(formatted_message),
+                    question=message.get("content", "")[:50],
                 )
-                # Send to all active chats for this session
-                await self._send_to_telegram(session_id, formatted_message)
+                await self._send_permission_dialog(session_id, message)
             else:
-                logger.info(
-                    "Message filtered out during formatting",
-                    message_type=message.get("type"),
-                    role=message.get("role"),
-                )
+                # Format the message for Telegram
+                formatted_message = self._format_message(message)
+
+                if formatted_message:
+                    logger.info(
+                        "Sending formatted message to Telegram",
+                        session_id=session_id,
+                        msg_len=len(formatted_message),
+                    )
+                    # Send to all active chats for this session
+                    await self._send_to_telegram(session_id, formatted_message)
+                else:
+                    logger.info(
+                        "Message filtered out during formatting",
+                        message_type=message.get("type"),
+                        role=message.get("role"),
+                    )
 
             return {"status": "ok"}
 
@@ -173,6 +185,10 @@ class ConversationWebhookHandler:
         elif msg_type == "message" and role == "user":
             # Echo user messages (optional)
             return None  # Skip user messages as they're already in Telegram
+
+        elif msg_type == "permission_dialog" and role == "system":
+            # Permission dialog - will be handled specially with inline keyboard
+            return None  # Handled separately in _send_to_telegram
 
         elif msg_type == "hook_notification" and role == "system":
             # Check if this is a "New Prompt" notification that matches a recent Telegram prompt
@@ -314,6 +330,200 @@ class ConversationWebhookHandler:
         # Store the message info for potential editing
         self.message_tracker.track_message(
             user_id, sent_msg.message_id, user_id, message_type
+        )
+
+    async def _send_permission_dialog(
+        self, session_id: str, message: Dict[str, Any]
+    ) -> None:
+        """Send permission dialog with inline keyboard buttons to users."""
+        question = message.get("content", "")
+        options = message.get("options", [])
+        dialog_id = message.get("dialog_id", f"dialog_{session_id}")
+
+        if not question or not options or len(options) != 3:
+            logger.warning(
+                "Invalid permission dialog",
+                question_length=len(question),
+                options_count=len(options),
+            )
+            return
+
+        # Store dialog info for callback handling
+        self.permission_dialogs[dialog_id] = {
+            "session_id": session_id,
+            "question": question,
+            "options": options,
+            "timestamp": message.get("timestamp"),
+        }
+
+        # Create inline keyboard with the 3 options
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    f"✅ {options[0]}", callback_data=f"perm_{dialog_id}_1"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"🔄 {options[1]}", callback_data=f"perm_{dialog_id}_2"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    f"❌ {options[2]}", callback_data=f"perm_{dialog_id}_3"
+                )
+            ],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Format the message - question already includes the header
+        formatted_message = f"{question}\n\nPlease select an option:"
+
+        # Send to all subscribed users
+        users_to_notify = (
+            self.subscribed_users
+            if self.subscribed_users
+            else (self.settings.allowed_users or [])
+        )
+
+        for user_id in users_to_notify:
+            try:
+                await self.bot.send_message(
+                    chat_id=user_id,
+                    text=formatted_message,
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=reply_markup,
+                )
+                logger.info(
+                    "Sent permission dialog to user",
+                    user_id=user_id,
+                    dialog_id=dialog_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to send permission dialog to user",
+                    user_id=user_id,
+                    error=str(e),
+                )
+
+    async def handle_permission_callback(self, callback_query, context) -> None:
+        """Handle permission dialog button callbacks."""
+        try:
+            callback_data = callback_query.data
+            user_id = callback_query.from_user.id
+
+            logger.info(
+                "Received permission callback",
+                user_id=user_id,
+                callback_data=callback_data,
+            )
+
+            # Parse callback data: perm_{dialog_id}_{option_number}
+            if not callback_data.startswith("perm_"):
+                logger.warning("Invalid permission callback data", data=callback_data)
+                return
+
+            # Remove "perm_" prefix and split by last underscore to get option number
+            remaining = callback_data[5:]  # Remove "perm_"
+            parts = remaining.rsplit("_", 1)  # Split from right, only once
+            if len(parts) != 2:
+                logger.warning("Malformed permission callback data", data=callback_data)
+                return
+
+            dialog_id = parts[0]
+            option_number = parts[1]
+
+            # Get dialog info
+            dialog_info = self.permission_dialogs.get(dialog_id)
+            if not dialog_info:
+                await callback_query.answer("This permission dialog has expired.")
+                return
+
+            # Send the response to Claude using the same integration as regular messages
+            await self._send_permission_response_to_claude(
+                callback_query, context, dialog_info, option_number
+            )
+
+            # Update the message to show the selected option
+            option_text = dialog_info["options"][int(option_number) - 1]
+            updated_message = (
+                f"🔐 **Permission Required**\n\n{dialog_info['question']}\n\n"
+                f"✅ **Selected:** {option_number}. {option_text}"
+            )
+
+            await callback_query.edit_message_text(
+                text=updated_message,
+                parse_mode=ParseMode.MARKDOWN,
+            )
+
+            await callback_query.answer(f"Selected option {option_number}")
+
+            # Clean up dialog info
+            del self.permission_dialogs[dialog_id]
+
+            logger.info(
+                "Permission callback handled successfully",
+                user_id=user_id,
+                dialog_id=dialog_id,
+                option=option_number,
+            )
+
+        except Exception as e:
+            logger.error("Error handling permission callback", error=str(e))
+            try:
+                await callback_query.answer("Error processing your selection.")
+            except Exception:
+                pass
+
+    async def _send_permission_response_to_claude(
+        self, callback_query, context, dialog_info: Dict[str, Any], option_number: str
+    ) -> None:
+        """Send the permission response to Claude using the same path as regular messages."""
+        try:
+            # Get Claude integration from context (same as regular messages)
+            # This is the proper way to access bot_data in callback handlers
+            claude_integration = context.bot_data.get("claude_integration")
+            if not claude_integration:
+                logger.error("Claude integration not available in bot_data")
+                # Fallback to direct tmux approach
+                await self._send_permission_response_via_tmux(option_number)
+                return
+
+            # Send the option number using the same method as regular messages
+            # This ensures it goes through the proper Claude integration pipeline
+            logger.info(
+                "About to send permission response to Claude",
+                option=option_number,
+                user_id=callback_query.from_user.id,
+                has_integration=bool(claude_integration),
+            )
+
+            result = await claude_integration.run_command(
+                prompt=option_number,
+                user_id=callback_query.from_user.id,  # Use the actual user ID who clicked the button
+                on_stream=None,  # No stream handling needed for simple responses
+            )
+
+            logger.info(
+                "Sent permission response to Claude via integration",
+                option=option_number,
+                user_id=callback_query.from_user.id,
+                result_content=result.content if result else "No result",
+                result_error=result.is_error if result else "No result",
+            )
+
+        except Exception as e:
+            logger.error(
+                "Error sending permission response to Claude via integration",
+                error=str(e),
+            )
+            # Fallback to direct tmux approach
+            await self._send_permission_response_via_tmux(option_number)
+
+    async def _send_permission_response_via_tmux(self, option_number: str) -> None:
+        """Fallback method: Send permission response directly via tmux."""
+        logger.error(
+            "Tmux fallback method called - this should not happen with new implementation"
         )
 
     def register_session(self, session_id: str, chat_id: int) -> None:
