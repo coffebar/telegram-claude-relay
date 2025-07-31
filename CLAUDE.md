@@ -63,3 +63,9 @@ TMUX_PANE=                     # Optional - auto-discovery if empty
 DEBUG=false
 
 ```
+
+### Limitations
+
+- Never add credentials or sensitive information to the codebase.
+- Never include real user IDs or sensitive data in the codebase, including paths, web searches, etc.
+- Never edit pyproject.toml

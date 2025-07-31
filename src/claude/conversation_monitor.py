@@ -292,7 +292,7 @@ class ConversationMonitor:
                 return f"💻 **Bash:** `{command}`{desc_text}"
 
             elif tool_name == "LS":
-                # VERIFIED: {"path": "/home/abc/Sync/Work/gifts"}
+                # VERIFIED: {"path": "/home/..."}
                 path = params.get("path", "")
                 return f"📂 **Listing:** `{path}`"
 
@@ -310,6 +310,56 @@ class ConversationMonitor:
                 todos = params.get("todos", [])
                 todo_count = len(todos)
                 return f"📝 **Managing todos:** {todo_count} items"
+
+            elif tool_name == "Read":
+                # VERIFIED: {"file_path": "/path/to/file", "offset": 162, "limit": 20}
+                file_path = params.get("file_path", "")
+                offset = params.get("offset")
+                limit = params.get("limit")
+                range_text = ""
+                if offset is not None or limit is not None:
+                    range_text = (
+                        f" (lines {offset or 0}-{(offset or 0) + (limit or 'end')})"
+                    )
+                return f"📖 **Reading:** `{file_path}`{range_text}"
+
+            elif tool_name == "Write":
+                # VERIFIED: {"file_path": "/path/to/file", "content": "..."}
+                file_path = params.get("file_path", "")
+                content = params.get("content", "")
+                size_text = f" ({len(content)} chars)" if content else ""
+                return f"✍️ **Writing:** `{file_path}`{size_text}"
+
+            elif tool_name == "Grep":
+                # VERIFIED: {"pattern": "search_pattern", "path": "/path", "output_mode": "content"}
+                pattern = params.get("pattern", "")
+                path = params.get("path", "")
+                output_mode = params.get("output_mode", "files_with_matches")
+                if len(pattern) > 50:
+                    pattern = pattern[:50] + "..."
+                mode_text = (
+                    f" ({output_mode})" if output_mode != "files_with_matches" else ""
+                )
+                return f"🔍 **Searching:** `{pattern}` in `{path}`{mode_text}"
+
+            elif tool_name == "Glob":
+                # VERIFIED: {"pattern": "*requirements*.txt"}
+                pattern = params.get("pattern", "")
+                return f"🗂️ **Finding files:** `{pattern}`"
+
+            elif tool_name == "MultiEdit":
+                # VERIFIED: {"file_path": "/path/to/file", "edits": [{"old_string": "...", "new_string": "..."}]}
+                file_path = params.get("file_path", "")
+                edits = params.get("edits", [])
+                edit_count = len(edits)
+                return f"✏️ **Multi-editing:** `{file_path}` ({edit_count} changes)"
+
+            elif tool_name == "WebSearch":
+                # VERIFIED: {"query": "search terms"}
+                query = params.get("query", "")
+                if len(query) > 60:
+                    query = query[:60] + "..."
+                return f"🌐 **Web Search:** `{query}`"
 
             else:
                 # Unknown/unverified tool - generic display
@@ -333,6 +383,8 @@ class ConversationMonitor:
                 return "✅ **File search completed**"
             elif tool_name == "MultiEdit":
                 return "✅ **Multi-edit completed**"
+            elif tool_name == "WebSearch":
+                return "✅ **Web search completed**"
             else:
                 return f"✅ **{tool_name} completed**"
 
