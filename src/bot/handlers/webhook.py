@@ -447,7 +447,7 @@ class ConversationWebhookHandler:
             # Update the message to show the selected option
             option_text = dialog_info["options"][int(option_number) - 1]
             updated_message = (
-                f"🔐 **Permission Required**\n\n{dialog_info['question']}\n\n"
+                f"{dialog_info['question']}\n\n"
                 f"✅ **Selected:** {option_number}. {option_text}"
             )
 
