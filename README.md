@@ -160,12 +160,24 @@ tmux send-keys -t claude-session "claude" Enter
   - Provide guided setup instructions
 
 ### Tool Usage Transparency
-- [ ] **Detailed Tool Messages**: Enhanced pre/post tool notifications
-  - Show which specific tool is being used (Read, Write, Bash, etc.)
-  - Display file paths for file operations (created, modified, deleted)
-  - Show command details for Bash tool usage
-  - Include execution time and success/failure status
-  - Format tool parameters in user-friendly way
+- [x] **Evidence-Based Tool Messages**: Scientific approach to tool transparency
+  - ✅ **Bash**: `💻 **Bash:** docker ps - Show running Docker containers`
+  - ✅ **LS**: `📂 **Listing:** /home/abc/Sync/Work/gifts`
+  - ✅ **Edit**: `✏️ **Editing:** /path/to/file - replacing: old text...`
+  - ✅ **TodoWrite**: `📝 **Managing todos:** 4 items`
+  - 🔧 **Unknown tools**: Generic display until verified
+  
+- [ ] **Adding New Tools (Future)**: How to add support for new tools scientifically
+  1. **Trigger the tool** - Use Claude Code to execute the new tool
+  2. **Check logs** - Look for `tool_input_full` in `telegram-claude-bot.log`
+  3. **Extract structure** - Find the exact parameter names and types
+  4. **Update code** - Add verified parameters to `src/claude/conversation_monitor.py`
+  5. **Test** - Verify the new tool shows detailed information
+  
+  Example verification command:
+  ```bash
+  grep -A 1 '"tool_name": "NewTool"' telegram-claude-bot.log | grep "tool_input_full"
+  ```
 
 ### Interactive Permission Handling
 - [ ] **Claude Permission Requests**: Handle Claude's permission/confirmation prompts

@@ -124,12 +124,14 @@ class UnixSocketServer:
         elif hook_type == "PreToolUse":
             # Handle pre-tool use notification
             tool_name = hook_data.get("tool_name", "")
-            parameters = hook_data.get("parameters", {})
+            tool_input = hook_data.get("tool_input", {})
             session_id = hook_data.get("session_id", "unknown")
             
             logger.info("Processing PreToolUse hook", 
                        session_id=session_id,
-                       tool_name=tool_name)
+                       tool_name=tool_name,
+                       tool_input_keys=list(tool_input.keys()) if isinstance(tool_input, dict) else "non-dict",
+                       tool_input_full=tool_input)  # Log the complete structure for analysis
             
             # Send notification about tool use
             asyncio.create_task(
@@ -137,7 +139,7 @@ class UnixSocketServer:
                     "type": "pre_tool_use",
                     "session_id": session_id,
                     "tool_name": tool_name,
-                    "parameters": parameters,
+                    "parameters": tool_input,  # Pass tool_input as parameters
                     "timestamp": hook_data.get("timestamp")
                 })
             )
@@ -147,13 +149,17 @@ class UnixSocketServer:
         elif hook_type == "PostToolUse":
             # Handle post-tool use notification
             tool_name = hook_data.get("tool_name", "")
-            result = hook_data.get("result", {})
+            tool_response = hook_data.get("tool_response", {})
+            tool_input = hook_data.get("tool_input", {})
             session_id = hook_data.get("session_id", "unknown")
             
             logger.info("Processing PostToolUse hook",
                        session_id=session_id,
                        tool_name=tool_name,
-                       has_result=bool(result))
+                       has_response=bool(tool_response),
+                       response_keys=list(tool_response.keys()) if isinstance(tool_response, dict) else "non-dict",
+                       tool_input_full=tool_input,  # Log input for reference
+                       tool_response_full=tool_response)  # Log complete response structure
             
             # Send notification about tool result
             asyncio.create_task(
@@ -161,7 +167,8 @@ class UnixSocketServer:
                     "type": "post_tool_use",
                     "session_id": session_id,
                     "tool_name": tool_name,
-                    "result_preview": str(result)[:200] if result else None,
+                    "parameters": tool_input,  # Include original parameters
+                    "result_preview": str(tool_response)[:200] if tool_response else None,
                     "timestamp": hook_data.get("timestamp")
                 })
             )

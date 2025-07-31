@@ -250,35 +250,39 @@ class ConversationMonitor:
             tool_name = notification.get("tool_name", "Unknown")
             params = notification.get("parameters", {})
             
-            # Format based on tool type with detailed parameters
-            if tool_name == "Edit":
-                file_path = params.get("file_path", "")
-                return f"✏️ **Editing:** `{file_path}`"
-            elif tool_name == "Write":
-                file_path = params.get("file_path", "")
-                return f"📝 **Creating:** `{file_path}`"
-            elif tool_name == "Read":
-                file_path = params.get("file_path", "")
-                return f"👁️ **Reading:** `{file_path}`"
-            elif tool_name == "Bash":
+            # EVIDENCE-BASED formatting - only tools with verified parameter structures
+            if tool_name == "Bash":
+                # VERIFIED: {"command": "docker ps", "description": "Show running Docker containers"}
                 command = params.get("command", "")
-                if len(command) > 100:
-                    command = command[:100] + "..."
-                return f"💻 **Running:** `{command}`"
-            elif tool_name == "Grep":
-                pattern = params.get("pattern", "")
-                path = params.get("path", ".")
-                return f"🔍 **Searching for:** `{pattern}` in `{path}`"
-            elif tool_name == "Glob":
-                pattern = params.get("pattern", "")
-                path = params.get("path", ".")
-                return f"🔍 **Finding files:** `{pattern}` in `{path}`"
-            elif tool_name == "MultiEdit":
+                description = params.get("description", "")
+                if len(command) > 80:
+                    command = command[:80] + "..."
+                desc_text = f" - {description}" if description else ""
+                return f"💻 **Bash:** `{command}`{desc_text}"
+            
+            elif tool_name == "LS":
+                # VERIFIED: {"path": "/home/abc/Sync/Work/gifts"}
+                path = params.get("path", "")
+                return f"📂 **Listing:** `{path}`"
+            
+            elif tool_name == "Edit":
+                # VERIFIED: {"file_path": "/path/to/file", "old_string": "...", "new_string": "..."}
                 file_path = params.get("file_path", "")
-                edit_count = len(params.get("edits", []))
-                return f"✏️ **Multi-editing:** `{file_path}` ({edit_count} changes)"
+                old_string = params.get("old_string", "")
+                if old_string and len(old_string) > 50:
+                    old_string = old_string[:50] + "..."
+                replace_text = f" - replacing: `{old_string}`" if old_string else ""
+                return f"✏️ **Editing:** `{file_path}`{replace_text}"
+            
+            elif tool_name == "TodoWrite":
+                # VERIFIED: {"todos": [{"content": "...", "status": "...", "priority": "...", "id": "..."}]}
+                todos = params.get("todos", [])
+                todo_count = len(todos)
+                return f"📝 **Managing todos:** {todo_count} items"
+            
             else:
-                return f"🔧 **Using Tool:** {tool_name}"
+                # Unknown/unverified tool - generic display
+                return f"🔧 **{tool_name}**"
                 
         elif notif_type == "post_tool_use":
             tool_name = notification.get("tool_name", "Unknown")
