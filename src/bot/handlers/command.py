@@ -1,16 +1,11 @@
 """Command handlers for bot operations."""
 
 import structlog
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update
+from telegram.ext import ContextTypes
 
 ENABLE_BUTTONS = False
 
-from telegram.ext import ContextTypes
-
-from ...claude.facade import ClaudeIntegration
-from ...config.settings import Settings
-from ...security.audit import AuditLogger
-from ...security.validators import SecurityValidator
 
 logger = structlog.get_logger()
 
@@ -41,9 +36,5 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
     # Log command
-    audit_logger: AuditLogger = context.bot_data.get("audit_logger")
-    if audit_logger:
-        await audit_logger.log_command(
-            user_id=user.id, command="start", args=[], success=True
-        )
+    logger.info("Start command executed", user_id=user.id)
 

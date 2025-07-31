@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 

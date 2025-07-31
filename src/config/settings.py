@@ -63,14 +63,8 @@ class Settings(BaseSettings):
 
 
     # tmux Integration
-    tmux_pane: Optional[str] = Field(
+    pane: Optional[str] = Field(
         None, description="tmux pane target (session:window.pane format). Leave empty for auto-discovery."
-    )
-    tmux_capture_lines: int = Field(
-        100, description="Number of lines to capture from tmux pane"
-    )
-    tmux_poll_interval: float = Field(
-        1.0, description="Seconds between output checks"
     )
 
     # Monitoring
@@ -86,6 +80,7 @@ class Settings(BaseSettings):
     webhook_url: Optional[str] = Field(None, description="Webhook URL for bot")
     webhook_port: int = Field(8443, description="Webhook port")
     webhook_path: str = Field("/webhook", description="Webhook path")
+    
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"

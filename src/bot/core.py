@@ -1,9 +1,10 @@
-"""Main Telegram bot class.
+"""Main Telegram bot class with Claude Code hook integration.
 
 Features:
-- Command registration
-- Handler management
-- Context injection
+- Command registration and message handling
+- Claude Code hook monitoring integration
+- Context injection and dependency management
+- Real-time tool status updates
 - Graceful shutdown
 """
 
@@ -11,10 +12,9 @@ import asyncio
 from typing import Any, Callable, Dict, Optional
 
 import structlog
-from telegram import BotCommand, Update
+from telegram import Update
 from telegram.ext import (
     Application,
-    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -36,7 +36,6 @@ class ClaudeCodeBot:
         self.deps = dependencies
         self.app: Optional[Application] = None
         self.is_running = False
-        self.feature_registry: Optional[FeatureRegistry] = None
 
     async def initialize(self) -> None:
         """Initialize bot application."""
@@ -221,9 +220,6 @@ class ClaudeCodeBot:
         try:
             self.is_running = False  # Stop the main loop first
 
-            # Shutdown feature registry
-            if self.feature_registry:
-                self.feature_registry.shutdown()
 
             if self.app:
                 # Stop the updater if it's running
@@ -281,20 +277,12 @@ class ClaudeCodeBot:
             except Exception:
                 logger.exception("Failed to send error message to user")
 
-        # Log to audit system if available
-        from ..security.audit import AuditLogger
-
-        audit_logger: Optional[AuditLogger] = context.bot_data.get("audit_logger")
-        if audit_logger and update and update.effective_user:
-            try:
-                await audit_logger.log_security_violation(
-                    user_id=update.effective_user.id,
-                    violation_type="system_error",
-                    details=f"Error type: {error_type.__name__}, Message: {str(error)}",
-                    severity="medium",
-                )
-            except Exception:
-                logger.exception("Failed to log error to audit system")
+        # Log system error details
+        if update and update.effective_user:
+            logger.error("System error for user", 
+                        user_id=update.effective_user.id,
+                        error_type=error_type.__name__,
+                        error_message=str(error))
 
     async def get_bot_info(self) -> Dict[str, Any]:
         """Get bot information."""

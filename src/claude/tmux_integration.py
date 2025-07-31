@@ -1,4 +1,4 @@
-"""tmux-based Claude integration."""
+"""tmux-based Claude integration for sending commands (responses via hooks)."""
 
 import asyncio
 import time
@@ -9,15 +9,13 @@ import structlog
 
 from src.config.settings import Settings
 from src.tmux.client import TmuxClient
-from src.tmux.exceptions import TmuxResponseTimeoutError
 from .responses import ClaudeResponse, StreamUpdate
-from src.claude.parser import ResponseFormatter
 
 logger = structlog.get_logger()
 
 
 class TmuxClaudeIntegration:
-    """Claude integration through tmux pane communication."""
+    """Claude integration for sending commands via tmux (responses delivered via hooks)."""
 
     def __init__(self, config: Settings, tmux_client: TmuxClient):
         """Initialize tmux Claude integration.
@@ -38,17 +36,17 @@ class TmuxClaudeIntegration:
         continue_session: bool = False,
         stream_callback: Optional[Callable] = None,
     ) -> ClaudeResponse:
-        """Execute command via tmux pane.
+        """Send command via tmux pane (response delivered via hooks).
         
         Args:
             prompt: User prompt to send to Claude
             working_directory: Working directory (used for session context)
             session_id: Session ID for tracking
             continue_session: Whether to continue existing session
-            stream_callback: Optional callback for streaming updates
+            stream_callback: Optional callback for streaming updates (unused in hook mode)
             
         Returns:
-            ClaudeResponse with the result
+            ClaudeResponse indicating command was sent successfully
         """
         start_time = time.time()
         
@@ -60,42 +58,27 @@ class TmuxClaudeIntegration:
                 session_id=session_id,
             )
 
-            # Use previous output as baseline, or capture current state if first time
-            if not self.last_full_output:
-                self.last_full_output = await self.tmux_client.capture_output(
-                    self.config.tmux_capture_lines
-                )
-            
-            initial_output = self.last_full_output
-
-            # Send prompt to Claude
+            # Send prompt to Claude (response will be delivered via hooks)
             await self.send_prompt(prompt, stream_callback)
-            
-            # Wait for response
-            final_output = await self.wait_for_response(
-                initial_output, 
-                timeout=self.config.claude_timeout_seconds,
-                stream_callback=stream_callback
-            )
-            
-            # Extract only the new content since last interaction
-            response_content = self._extract_new_response(initial_output, final_output)
-            
-            # Update our tracking of the last output
-            self.last_full_output = final_output
 
             # Calculate metrics
             duration_ms = int((time.time() - start_time) * 1000)
             
-            # Create response
-            return ClaudeResponse(
-                content=response_content,
-                session_id=session_id or "tmux-session",
-                cost=0.0,  # Cost tracking not available via tmux
+            logger.info(
+                "tmux command sent successfully - response will be delivered via hooks",
+                session_id=session_id,
                 duration_ms=duration_ms,
-                num_turns=1,  # Turn tracking not available via tmux
+            )
+            
+            # Create response indicating command was sent
+            return ClaudeResponse(
+                content="Command sent - response will be delivered via hooks",
+                session_id=session_id or "tmux-session",
+                cost=0.0,
+                duration_ms=duration_ms,
+                num_turns=1,
                 is_error=False,
-                tools_used=[],  # Tool tracking not available via tmux
+                tools_used=[],
             )
 
         except Exception as e:
@@ -165,9 +148,7 @@ class TmuxClaudeIntegration:
         
         while time.time() - start_time < timeout:
             # Capture current output
-            current_output = await self.tmux_client.capture_output(
-                self.config.tmux_capture_lines
-            )
+            current_output = await self.tmux_client.capture_output(100)
             
             # Check if output changed
             if current_output != last_output:
@@ -189,12 +170,10 @@ class TmuxClaudeIntegration:
                     if '╭' in current_output and '╰' in current_output:
                         return current_output
             
-            await asyncio.sleep(self.config.tmux_poll_interval)
+            await asyncio.sleep(1.0)
         
         # Timeout reached, return what we have
-        final_output = await self.tmux_client.capture_output(
-            self.config.tmux_capture_lines
-        )
+        final_output = await self.tmux_client.capture_output(100)
         return final_output
 
     def _extract_new_response(self, previous_output: str, current_output: str) -> str:

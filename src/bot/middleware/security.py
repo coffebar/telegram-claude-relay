@@ -29,20 +29,11 @@ async def security_middleware(
         logger.warning("No user information in update")
         return await handler(event, data)
 
-    # Get dependencies from context
-    security_validator = data.get("security_validator")
-    audit_logger = data.get("audit_logger")
-
-    if not security_validator:
-        logger.error("Security validator not available in middleware context")
-        # Continue without validation (log error but don't block)
-        return await handler(event, data)
-
     # Validate text content if present
     message = event.effective_message
     if message and message.text:
         is_safe, violation_type = await validate_message_content(
-            message.text, security_validator, user_id, audit_logger
+            message.text, user_id
         )
         if not is_safe:
             await message.reply_text(
@@ -69,7 +60,7 @@ async def security_middleware(
 
 
 async def validate_message_content(
-    text: str, security_validator: Any, user_id: int, audit_logger: Any
+    text: str, user_id: int
 ) -> tuple[bool, str]:
     """Validate message text content for security threats."""
 
@@ -93,15 +84,6 @@ async def validate_message_content(
 
     for pattern in dangerous_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            if audit_logger:
-                await audit_logger.log_security_violation(
-                    user_id=user_id,
-                    violation_type="command_injection_attempt",
-                    details=f"Dangerous pattern detected: {pattern}",
-                    severity="high",
-                    attempted_action="message_send",
-                )
-
             logger.warning(
                 "Command injection attempt detected",
                 user_id=user_id,
@@ -123,15 +105,6 @@ async def validate_message_content(
 
     for pattern in path_traversal_patterns:
         if re.search(pattern, text):
-            if audit_logger:
-                await audit_logger.log_security_violation(
-                    user_id=user_id,
-                    violation_type="path_traversal_attempt",
-                    details=f"Path traversal pattern detected: {pattern}",
-                    severity="high",
-                    attempted_action="message_send",
-                )
-
             logger.warning(
                 "Path traversal attempt detected",
                 user_id=user_id,
@@ -153,37 +126,8 @@ async def validate_message_content(
 
     for pattern in suspicious_patterns:
         if re.search(pattern, text, re.IGNORECASE):
-            if audit_logger:
-                await audit_logger.log_security_violation(
-                    user_id=user_id,
-                    violation_type="suspicious_url",
-                    details=f"Suspicious URL pattern detected: {pattern}",
-                    severity="medium",
-                    attempted_action="message_send",
-                )
-
             logger.warning("Suspicious URL detected", user_id=user_id, pattern=pattern)
             return False, "Suspicious URL detected"
-
-    # Sanitize content using security validator
-    sanitized = security_validator.sanitize_command_input(text)
-    if len(sanitized) < len(text) * 0.5:  # More than 50% removed
-        if audit_logger:
-            await audit_logger.log_security_violation(
-                user_id=user_id,
-                violation_type="excessive_sanitization",
-                details="More than 50% of content was dangerous",
-                severity="medium",
-                attempted_action="message_send",
-            )
-
-        logger.warning(
-            "Excessive content sanitization required",
-            user_id=user_id,
-            original_length=len(text),
-            sanitized_length=len(sanitized),
-        )
-        return False, "Content contains too many dangerous characters"
 
     return True, ""
 
@@ -203,7 +147,6 @@ async def threat_detection_middleware(
     if not user_id:
         return await handler(event, data)
 
-    audit_logger = data.get("audit_logger")
 
     # Track user behavior patterns
     user_behavior = data.setdefault("user_behavior", {})
@@ -263,15 +206,6 @@ async def threat_detection_middleware(
 
         # Alert if too many reconnaissance attempts
         if user_data["recon_attempts"] > 5:
-            if audit_logger:
-                await audit_logger.log_security_violation(
-                    user_id=user_id,
-                    violation_type="reconnaissance_attempt",
-                    details=f"Multiple reconnaissance patterns detected: {user_data['recon_attempts']}",
-                    severity="high",
-                    attempted_action="reconnaissance",
-                )
-
             logger.warning(
                 "Reconnaissance attempt pattern detected",
                 user_id=user_id,

@@ -30,8 +30,8 @@ class ClaudeIntegration:
         if self._pane_target:
             return self._pane_target
             
-        if self.config.tmux_pane and self.config.tmux_pane.strip():
-            self._pane_target = self.config.tmux_pane.strip()
+        if self.config.pane and self.config.pane.strip():
+            self._pane_target = self.config.pane.strip()
             logger.info("Using configured tmux pane", pane=self._pane_target)
             return self._pane_target
         

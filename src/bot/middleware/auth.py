@@ -31,7 +31,6 @@ async def auth_middleware(handler: Callable, event: Any, data: Dict[str, Any]) -
 
     # Get dependencies from context
     auth_manager = data.get("auth_manager")
-    audit_logger = data.get("audit_logger")
 
     if not auth_manager:
         logger.error("Authentication manager not available in middleware context")
@@ -64,14 +63,7 @@ async def auth_middleware(handler: Callable, event: Any, data: Dict[str, Any]) -
     # Try to authenticate (providers will check whitelist and tokens)
     authentication_successful = await auth_manager.authenticate_user(user_id)
 
-    # Log authentication attempt
-    if audit_logger:
-        await audit_logger.log_auth_attempt(
-            user_id=user_id,
-            success=authentication_successful,
-            method="automatic",
-            reason="message_received",
-        )
+    logger.info("Auth attempt", user_id=user_id, success=authentication_successful)
 
     if authentication_successful:
         session = auth_manager.get_session(user_id)

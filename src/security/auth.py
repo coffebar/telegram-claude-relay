@@ -18,7 +18,6 @@ import structlog
 
 from src.exceptions import SecurityError
 
-# from src.exceptions import AuthenticationError  # Future use
 
 logger = structlog.get_logger()
 

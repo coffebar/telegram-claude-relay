@@ -31,7 +31,6 @@ async def rate_limit_middleware(
 
     # Get dependencies from context
     rate_limiter = data.get("rate_limiter")
-    audit_logger = data.get("audit_logger")
 
     if not rate_limiter:
         logger.error("Rate limiter not available in middleware context")
@@ -51,14 +50,6 @@ async def rate_limit_middleware(
             message=message,
         )
 
-        # Log rate limit violation
-        if audit_logger:
-            await audit_logger.log_rate_limit_exceeded(
-                user_id=user_id,
-                limit_type="combined",
-                current_usage=0,  # Would need to extract from rate_limiter
-                limit_value=0,  # Would need to extract from rate_limiter
-            )
 
         # Send user-friendly rate limit message
         if event.effective_message:

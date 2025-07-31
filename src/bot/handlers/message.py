@@ -1,7 +1,5 @@
 """Message handlers for non-command inputs."""
 
-import asyncio
-from pathlib import Path
 from typing import Optional
 
 import structlog
@@ -10,7 +8,6 @@ from telegram.ext import ContextTypes
 
 from ...claude.exceptions import ClaudeToolValidationError
 from ...config.settings import Settings
-from ...security.audit import AuditLogger
 from ...security.rate_limiter import RateLimiter
 
 logger = structlog.get_logger()
@@ -163,7 +160,6 @@ async def handle_text_message(
 
     # Get services
     rate_limiter: Optional[RateLimiter] = context.bot_data.get("rate_limiter")
-    audit_logger: Optional[AuditLogger] = context.bot_data.get("audit_logger")
 
     logger.info(
         "Processing text message", user_id=user_id, message_length=len(message_text)
@@ -188,6 +184,11 @@ async def handle_text_message(
             reply_to_message_id=update.message.message_id,
         )
 
+        # Record this prompt to prevent echo via webhook
+        webhook_handler = context.bot_data.get("webhook_handler")
+        if webhook_handler:
+            webhook_handler.record_telegram_prompt(user_id, message_text)
+
         # Get Claude integration and storage from context
         claude_integration = context.bot_data.get("claude_integration")
         storage = context.bot_data.get("storage")
@@ -207,7 +208,10 @@ async def handle_text_message(
             try:
                 progress_text = await _format_progress_update(update_obj)
                 if progress_text:
-                    await progress_msg.edit_text(progress_text, parse_mode="Markdown")
+                    try:
+                        await progress_msg.edit_text(progress_text, parse_mode="Markdown")
+                    except Exception as edit_error:
+                        logger.warning("Failed to edit progress message", error=str(edit_error))
             except Exception as e:
                 logger.warning("Failed to update progress message", error=str(e))
 
@@ -232,13 +236,18 @@ async def handle_text_message(
                 except Exception as e:
                     logger.warning("Failed to log interaction to storage", error=str(e))
 
-            # Format response
-            from ..utils.formatting import ResponseFormatter
-
-            formatter = ResponseFormatter(settings)
-            formatted_messages = formatter.format_claude_response(
-                claude_response.content
-            )
+            # Hook monitoring handles all response formatting and sending
+            logger.info("Claude command sent - response will be delivered via hook monitoring", user_id=user_id)
+            
+            # Delete progress message (hook will send the actual response)
+            try:
+                await progress_msg.delete()
+            except Exception as delete_error:
+                logger.warning("Failed to delete progress message", error=str(delete_error))
+            
+            
+            logger.info("Text message processed successfully - hook monitoring will deliver response", user_id=user_id)
+            return
 
         except ClaudeToolValidationError as e:
             # Tool validation error with detailed instructions
@@ -248,126 +257,47 @@ async def handle_text_message(
                 user_id=user_id,
                 blocked_tools=e.blocked_tools,
             )
-            # Error message already formatted, create FormattedMessage
-            from ..utils.formatting import FormattedMessage
-
-            formatted_messages = [FormattedMessage(str(e), parse_mode="Markdown")]
+            
+            # Delete progress message and send error
+            try:
+                await progress_msg.delete()
+            except Exception as delete_error:
+                logger.warning("Failed to delete progress message", error=str(delete_error))
+            await _safe_reply_text(
+                update,
+                str(e),
+                parse_mode="Markdown",
+                reply_to_message_id=update.message.message_id,
+            )
+            
+            
         except Exception as e:
             logger.error("Claude integration failed", error=str(e), user_id=user_id)
-            # Format error and create FormattedMessage
-            from ..utils.formatting import FormattedMessage
-
-            formatted_messages = [
-                FormattedMessage(_format_error_message(str(e)), parse_mode="Markdown")
-            ]
-
-        # Delete progress message
-        await progress_msg.delete()
-
-        # Send formatted responses (may be multiple messages)
-        for i, message in enumerate(formatted_messages):
+            
+            # Delete progress message and send error
             try:
-                await _safe_reply_text(
-                    update,
-                    message.text,
-                    parse_mode=message.parse_mode,
-                    reply_markup=message.reply_markup,
-                    reply_to_message_id=update.message.message_id if i == 0 else None,
-                )
-
-                # Small delay between messages to avoid rate limits
-                if i < len(formatted_messages) - 1:
-                    await asyncio.sleep(0.5)
-
-            except Exception as e:
-                logger.error(
-                    "Failed to send response message", error=str(e), message_index=i
-                )
-                # Try to send error message
-                await _safe_reply_text(
-                    update,
-                    "❌ Failed to send response. Please try again.",
-                    reply_to_message_id=update.message.message_id if i == 0 else None,
-                )
-
-        # Update session info
-        context.user_data["last_message"] = update.message.text
-
-        # Add conversation enhancements if available
-        features = context.bot_data.get("features")
-        conversation_enhancer = (
-            features.get_conversation_enhancer() if features else None
-        )
-
-        if conversation_enhancer and claude_response:
-            try:
-                # Update conversation context
-                conversation_context = conversation_enhancer.update_context(
-                    session_id=claude_response.session_id,
-                    user_id=user_id,
-                    working_directory=str(current_dir),
-                    tools_used=claude_response.tools_used or [],
-                    response_content=claude_response.content,
-                )
-
-                # Check if we should show follow-up suggestions
-                if conversation_enhancer.should_show_suggestions(
-                    claude_response.tools_used or [], claude_response.content
-                ):
-                    # Generate follow-up suggestions
-                    suggestions = conversation_enhancer.generate_follow_up_suggestions(
-                        claude_response.content,
-                        claude_response.tools_used or [],
-                        conversation_context,
-                    )
-
-                    if suggestions:
-                        # Create keyboard with suggestions
-                        suggestion_keyboard = (
-                            conversation_enhancer.create_follow_up_keyboard(suggestions)
-                        )
-
-                        # Send follow-up suggestions
-                        await update.message.reply_text(
-                            "💡 **What would you like to do next?**",
-                            parse_mode="Markdown",
-                            reply_markup=suggestion_keyboard,
-                        )
-
-            except Exception as e:
-                logger.warning(
-                    "Conversation enhancement failed", error=str(e), user_id=user_id
-                )
-
-        # Log successful message processing
-        if audit_logger:
-            await audit_logger.log_command(
-                user_id=user_id,
-                command="text_message",
-                args=[update.message.text[:100]],  # First 100 chars
-                success=True,
+                await progress_msg.delete()
+            except Exception as delete_error:
+                logger.warning("Failed to delete progress message", error=str(delete_error))
+            error_message = _format_error_message(str(e))
+            await _safe_reply_text(
+                update,
+                error_message,
+                parse_mode="Markdown",
+                reply_to_message_id=update.message.message_id,
             )
-
-        logger.info("Text message processed successfully", user_id=user_id)
+            
 
     except Exception as e:
         # Clean up progress message if it exists
         try:
             await progress_msg.delete()
-        except:
-            pass
+        except Exception as delete_error:
+            logger.warning("Failed to delete progress message in exception handler", error=str(delete_error))
 
         error_msg = f"❌ **Error processing message**\n\n{str(e)}"
         await _safe_reply_text(update, error_msg, parse_mode="Markdown")
 
-        # Log failed processing
-        if audit_logger:
-            await audit_logger.log_command(
-                user_id=user_id,
-                command="text_message",
-                args=[update.message.text[:100]],
-                success=False,
-            )
 
         logger.error("Error processing text message", error=str(e), user_id=user_id)
 
