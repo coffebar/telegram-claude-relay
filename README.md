@@ -11,57 +11,74 @@ A Telegram bot that acts as a relay between Telegram and Claude Code running in 
 
 ## Setup
 
-### 1. Prerequisites
+### Prerequisites
 
 - Python 3.8+
 - `tmux` installed
 - Claude Code CLI installed and authenticated
-- Telegram bot token from [@BotFather](https://t.me/BotFather)
-- Claude Hooks set in ~/.claude/settings.json
 
-### 2. Start Claude in tmux (REQUIRED FIRST)
+### 1. Create Your Telegram Bot (Required)
 
-**You MUST start Claude Code in tmux before running the bot.** The bot connects to Claude running in a tmux pane.
+1. Message [@BotFather](https://t.me/BotFather) on Telegram
+2. Send `/newbot` and follow the prompts
+3. Save your bot token (looks like: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
+4. Get your Telegram user ID (message [@userinfobot](https://t.me/userinfobot))
 
-### 3. Configure the bot
+### 2. Installation
 
 ```bash
-# Copy environment template
+# Clone and enter directory
+git clone https://github.com/coffebar/telegram-claude-relay
+cd telegram-claude-relay
+
+# Configure your bot
 cp .env.example .env
+# Edit .env with your bot token and user ID from step 1
 
-# Edit .env with your settings
-TELEGRAM_BOT_TOKEN=your_bot_token_here
-TELEGRAM_BOT_USERNAME=your_bot_username
-ALLOWED_USERS=123456789,987654321
-
-# Option A: Let bot auto-discover Claude pane (recommended)
-PANE=
-
-# Option B: Specify exact pane (format: session:window.pane)
-PANE=claude-session:0.0
+# Complete setup (dependencies + Claude hooks)
+make setup-full
 ```
 
-### 4. Install and run
+### 3. Start Claude in tmux
+
+Open a tmux session in any directory where you want to work:
 
 ```bash
-# Setup (creates venv, installs dependencies)
-make setup
+# Start tmux and Claude
+tmux new-session -s my-coding-session
+cd /path/to/your/project
+claude
+```
 
-# Run the bot
+### 4. Run the Bot
+
+```bash
+# In a separate terminal
+cd telegram-claude-relay
 make run
 ```
 
 ## Usage
 
-**Important: Follow this order every time!**
-
-1. **First**: Start Claude in tmux (see step 2 above)
-2. **Then**: Start the bot with `make run`
-3. Message the bot on Telegram
-4. Your message goes directly to Claude in tmux
-5. Claude's response comes back with live status updates showing tools being used
+1. Start Claude in any tmux session (in your project directory)
+2. Run the bot with `make run`
+3. Message your bot on Telegram
+4. Your messages go directly to Claude
+5. Claude's responses come back with live tool updates
 
 The bot uses Claude Code hooks to provide real-time tool notifications and live-updating status messages.
+
+## Features
+
+- **Real-time Tool Transparency**: See exactly what Claude is doing with full code display
+- **Interactive Permission Handling**: Approve/deny Claude's actions with inline keyboard buttons
+- **Live Status Updates**: Watch Claude's thinking process and tool usage in real-time
+- **Hook-based Integration**: Deep integration with Claude Code via Unix socket communication
+- **Smart Pane Discovery**: Automatically finds Claude running in any tmux pane
+- **Whitelist Authentication**: Simple user ID based access control (configure in ALLOWED_USERS)
+- **Rate Limiting**: Built-in protection against spam (60 requests/minute + burst protection)
+- **Automated Setup**: One-command installation with automatic Claude hooks configuration
+- **System Monitoring**: Built-in status checks and log streaming
 
 ## Configuration
 
@@ -142,7 +159,7 @@ tmux send-keys -t claude-session "claude" Enter
 
 ### Hook Setup Automation
 
-- [ ] **Hook Install/Uninstall**: Create `make install-hooks` and `make uninstall-hooks` commands
+- [x] **Hook Install/Uninstall**: Create `make install-hooks` and `make uninstall-hooks` commands
   - Automatically backup existing `~/.claude/settings.json`
   - Create `~/.claude/settings.json` if not exists
   - Install hooks from `claude-code-settings.json` template with real paths to python scripts
@@ -192,21 +209,13 @@ tmux send-keys -t claude-session "claude" Enter
   grep -A 1 '"tool_name": "NewTool"' telegram-claude-bot.log | grep "tool_input_full"
   ```
 
-### Interactive Permission Handling
-
-- [x] **Claude Permission Requests**: Handle Claude's permission/confirmation prompts
-  - Detect when Claude asks for user confirmation
-  - Send Telegram inline keyboard buttons for 1,2,3 responses
-  - Forward user selections back to Claude automatically
-  - Show clear context of what Claude is asking permission for
 
 ### Makefile Enhancements
 
-- [ ] **Integrated Workflow**: Streamline the entire setup process
-  - `make setup-full`: Install hooks + dependencies + validate configuration
-  - `make start-claude`: Start Claude in tmux automatically
-  - `make status`: Check tmux session, hooks, and bot status
-  - `make logs`: Tail bot logs with filtering
+- [x] **Integrated Workflow**: Streamline the entire setup process
+  - ✅ `make setup-full`: Install hooks + dependencies + validate configuration
+  - ✅ `make status`: Check tmux session, hooks, and bot status
+  - ✅ `make logs`: Tail bot logs with filtering
   - ✅ `make format`: Format all Python files
   - ✅ `make lint`: Run linting checks
   - ✅ `make format-check`: Check if files are properly formatted
