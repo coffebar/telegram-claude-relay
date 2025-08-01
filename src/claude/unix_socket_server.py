@@ -28,7 +28,9 @@ class UnixSocketServer:
         # Track recent PreToolUse hooks to distinguish permission vs idle notifications
         self.recent_tool_usage: Dict[str, float] = {}  # session_id -> timestamp
         # Store recent tool context for fallback when transcript parsing fails
-        self.recent_tool_context: Dict[str, Dict[str, Any]] = {}  # session_id -> tool_context
+        self.recent_tool_context: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # session_id -> tool_context
 
     async def start(self):
         """Start the Unix socket server."""
@@ -157,12 +159,14 @@ class UnixSocketServer:
                 self.recent_tool_context[session_id] = {
                     "tool_use": tool_name,
                     "tool_input": tool_input,
-                    "timestamp": time.time()
+                    "timestamp": time.time(),
                 }
-                logger.debug("Stored tool context for fallback",
-                           session_id=session_id,
-                           tool_name=tool_name,
-                           context_keys=list(self.recent_tool_context[session_id].keys()))
+                logger.debug(
+                    "Stored tool context for fallback",
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    context_keys=list(self.recent_tool_context[session_id].keys()),
+                )
 
             logger.info(
                 "Processing PreToolUse hook",
@@ -223,6 +227,7 @@ class UnixSocketServer:
                         "result_preview": (
                             str(tool_response)[:200] if tool_response else None
                         ),
+                        "tool_response": tool_response,  # Pass full response
                         "timestamp": hook_data.get("timestamp"),
                     }
                 )
@@ -256,19 +261,25 @@ class UnixSocketServer:
                 context = self._get_fallback_context(session_id)
 
                 if context:
-                    logger.info("Using PreToolUse hook context (primary source)",
-                              session_id=session_id,
-                              hook_context=context)
+                    logger.info(
+                        "Using PreToolUse hook context (primary source)",
+                        session_id=session_id,
+                        hook_context=context,
+                    )
                 else:
                     # Secondary fallback: Try transcript parsing (for edge cases)
-                    logger.info("No recent PreToolUse context, trying transcript parsing")
+                    logger.info(
+                        "No recent PreToolUse context, trying transcript parsing"
+                    )
                     context = await self._get_permission_context_from_transcript(
                         transcript_path
                     )
                     if context:
-                        logger.info("Using transcript context (fallback)",
-                                  session_id=session_id,
-                                  transcript_context=context)
+                        logger.info(
+                            "Using transcript context (fallback)",
+                            session_id=session_id,
+                            transcript_context=context,
+                        )
 
                 logger.info(
                     "Permission context extracted",
@@ -327,7 +338,9 @@ class UnixSocketServer:
 
         # If tool usage was recent, this is likely a permission dialog
         time_since_tool = time.time() - recent_tool_time
-        is_recent = time_since_tool <= 60  # 60 second window (extended for transcript processing)
+        is_recent = (
+            time_since_tool <= 60
+        )  # 60 second window (extended for transcript processing)
 
         logger.info(
             "Permission dialog detection",
@@ -351,19 +364,23 @@ class UnixSocketServer:
         # Check if context is still recent (within 90 seconds)
         context_age = time.time() - recent_context.get("timestamp", 0)
         if context_age > 90:
-            logger.debug("PreToolUse context too old",
-                        session_id=session_id,
-                        context_age=context_age)
+            logger.debug(
+                "PreToolUse context too old",
+                session_id=session_id,
+                context_age=context_age,
+            )
             return None
 
         tool_name = recent_context.get("tool_use")
         tool_input = recent_context.get("tool_input", {})
 
-        logger.info("Processing PreToolUse hook context",
-                   session_id=session_id,
-                   tool_name=tool_name,
-                   tool_input_keys=list(tool_input.keys()) if tool_input else [],
-                   context_age_seconds=context_age)
+        logger.info(
+            "Processing PreToolUse hook context",
+            session_id=session_id,
+            tool_name=tool_name,
+            tool_input_keys=list(tool_input.keys()) if tool_input else [],
+            context_age_seconds=context_age,
+        )
 
         # Build context similar to transcript parsing
         context_info = {
@@ -389,23 +406,29 @@ class UnixSocketServer:
                     context_info["new_code"] = first_edit.get("new_string", "")
                     # Store edit count for permission dialog formatting
                     context_info["edit_count"] = len(edits)
-                    logger.info("MultiEdit PreToolUse context extracted",
-                              session_id=session_id,
-                              edit_count=len(edits),
-                              first_edit_preview=str(first_edit.get("old_string", ""))[:100])
+                    logger.info(
+                        "MultiEdit PreToolUse context extracted",
+                        session_id=session_id,
+                        edit_count=len(edits),
+                        first_edit_preview=str(first_edit.get("old_string", ""))[:100],
+                    )
                 else:
                     context_info["code_snippet"] = None
                     context_info["new_code"] = None
                     context_info["edit_count"] = 0
             elif tool_name == "Write":
                 context_info["code_snippet"] = tool_input.get("content", "")
-                context_info["new_code"] = None  # Write doesn't have old/new, just content
+                context_info["new_code"] = (
+                    None  # Write doesn't have old/new, just content
+                )
         elif tool_name == "Bash":
             context_info["code_snippet"] = tool_input.get("command", "")
 
-        logger.info("PreToolUse hook context built successfully",
-                   session_id=session_id,
-                   context_info=context_info)
+        logger.info(
+            "PreToolUse hook context built successfully",
+            session_id=session_id,
+            context_info=context_info,
+        )
 
         return context_info
 
@@ -458,14 +481,19 @@ class UnixSocketServer:
                         message = json.loads(line.strip())
                         recent_messages.append(message)
                     except json.JSONDecodeError:
-                        logger.debug("Skipping invalid JSON line in transcript",
-                                   line_number=line_num, transcript_path=transcript_path)
+                        logger.debug(
+                            "Skipping invalid JSON line in transcript",
+                            line_number=line_num,
+                            transcript_path=transcript_path,
+                        )
                         continue
 
-            logger.info("Transcript parsing completed",
-                       transcript_path=transcript_path,
-                       total_messages=len(recent_messages),
-                       searching_last_messages=min(20, len(recent_messages)))
+            logger.info(
+                "Transcript parsing completed",
+                transcript_path=transcript_path,
+                total_messages=len(recent_messages),
+                searching_last_messages=min(20, len(recent_messages)),
+            )
 
             # Look for the most recent assistant message that might contain the permission request context
             # Permission requests usually come after Claude tries to use a tool
@@ -477,10 +505,14 @@ class UnixSocketServer:
             }
 
             # Check last few messages for context
-            messages_to_search = recent_messages[-20:]  # Last 20 messages (extended search)
-            logger.info("Starting context extraction",
-                       messages_to_check=len(messages_to_search),
-                       transcript_path=transcript_path)
+            messages_to_search = recent_messages[
+                -20:
+            ]  # Last 20 messages (extended search)
+            logger.info(
+                "Starting context extraction",
+                messages_to_check=len(messages_to_search),
+                transcript_path=transcript_path,
+            )
 
             for msg_idx, msg in enumerate(reversed(messages_to_search)):
                 # Get the message content - it's nested in msg.message.content
@@ -501,17 +533,21 @@ class UnixSocketServer:
 
                 if isinstance(content, list):
                     # Handle structured content
-                    logger.debug("Processing structured content list",
-                               content_items=len(content),
-                               message_index=msg_idx)
+                    logger.debug(
+                        "Processing structured content list",
+                        content_items=len(content),
+                        message_index=msg_idx,
+                    )
 
                     for item_idx, item in enumerate(content):
                         if isinstance(item, dict):
                             item_type = item.get("type", "")
-                            logger.debug("Processing content item",
-                                       item_index=item_idx,
-                                       item_type=item_type,
-                                       item_keys=list(item.keys()))
+                            logger.debug(
+                                "Processing content item",
+                                item_index=item_idx,
+                                item_type=item_type,
+                                item_keys=list(item.keys()),
+                            )
 
                             if item.get("type") == "tool_use":
                                 tool_name = item.get("name", "")
@@ -546,14 +582,22 @@ class UnixSocketServer:
                                         if edits:
                                             # For permission dialog, show summary of first edit as preview
                                             first_edit = edits[0]
-                                            context_info["code_snippet"] = first_edit.get("old_string", "")
-                                            context_info["new_code"] = first_edit.get("new_string", "")
+                                            context_info["code_snippet"] = (
+                                                first_edit.get("old_string", "")
+                                            )
+                                            context_info["new_code"] = first_edit.get(
+                                                "new_string", ""
+                                            )
                                             # Store edit count for permission dialog formatting
                                             context_info["edit_count"] = len(edits)
-                                            logger.info("MultiEdit transcript context extracted",
-                                                      message_index=msg_idx,
-                                                      edit_count=len(edits),
-                                                      first_edit_preview=str(first_edit.get("old_string", ""))[:100])
+                                            logger.info(
+                                                "MultiEdit transcript context extracted",
+                                                message_index=msg_idx,
+                                                edit_count=len(edits),
+                                                first_edit_preview=str(
+                                                    first_edit.get("old_string", "")
+                                                )[:100],
+                                            )
                                         else:
                                             context_info["code_snippet"] = None
                                             context_info["new_code"] = None
@@ -567,11 +611,15 @@ class UnixSocketServer:
                                             None  # Write doesn't have old/new, just content
                                         )
 
-                                    logger.info("Context extraction successful",
-                                              tool_name=tool_name,
-                                              file_path=context_info.get("file_path"),
-                                              has_code_snippet=bool(context_info.get("code_snippet")),
-                                              context_info=context_info)
+                                    logger.info(
+                                        "Context extraction successful",
+                                        tool_name=tool_name,
+                                        file_path=context_info.get("file_path"),
+                                        has_code_snippet=bool(
+                                            context_info.get("code_snippet")
+                                        ),
+                                        context_info=context_info,
+                                    )
                                     return context_info  # Found relevant context
 
                                 elif tool_name == "Bash":
@@ -579,10 +627,12 @@ class UnixSocketServer:
                                     context_info["code_snippet"] = tool_input.get(
                                         "command", ""
                                     )
-                                    logger.info("Context extraction successful (Bash)",
-                                              tool_name=tool_name,
-                                              command=context_info.get("code_snippet"),
-                                              context_info=context_info)
+                                    logger.info(
+                                        "Context extraction successful (Bash)",
+                                        tool_name=tool_name,
+                                        command=context_info.get("code_snippet"),
+                                        context_info=context_info,
+                                    )
                                     return context_info
 
                 elif isinstance(content, str):
@@ -595,14 +645,18 @@ class UnixSocketServer:
 
             # Log final result
             if context_info["tool_use"]:
-                logger.info("Context extraction completed successfully",
-                           context_info=context_info)
+                logger.info(
+                    "Context extraction completed successfully",
+                    context_info=context_info,
+                )
                 return context_info
             else:
-                logger.warning("Context extraction failed - no tool_use found in transcript",
-                             transcript_path=transcript_path,
-                             messages_searched=len(messages_to_search),
-                             total_messages=len(recent_messages))
+                logger.warning(
+                    "Context extraction failed - no tool_use found in transcript",
+                    transcript_path=transcript_path,
+                    messages_searched=len(messages_to_search),
+                    total_messages=len(recent_messages),
+                )
                 return None
 
         except Exception as e:

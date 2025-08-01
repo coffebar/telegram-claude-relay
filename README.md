@@ -79,6 +79,7 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 - **Rate Limiting**: Built-in protection against spam (60 requests/minute + burst protection)
 - **Automated Setup**: One-command installation with automatic Claude hooks configuration
 - **System Monitoring**: Built-in status checks and log streaming
+- **Diff Formatting**: Code edits displayed in unified diff format for easy review
 
 ## Configuration
 
@@ -156,14 +157,6 @@ tmux send-keys -t claude-session "claude" Enter
   - Filter out hooks from other Claude instances
   - Prevent cross-session message contamination
   - Support multiple bots with different tmux sessions (independent setups)
-
-### Enhanced Integration
-
-- [ ] **Smart Hook Detection**: Auto-detect if hooks are properly configured
-  - Check `~/.claude/settings.json` on startup
-  - Warn user if hooks are missing or misconfigured
-  - Provide setup instructions
-- [ ] Diff format for code edits?
 
 ### Optimizations
 

@@ -383,7 +383,9 @@ class ConversationMonitor:
         elif tool_use == "MultiEdit":
             # Get edit count from context if available
             edit_count = context.get("edit_count", 0)
-            edit_text = f"{edit_count} changes" if edit_count > 0 else "multiple changes"
+            edit_text = (
+                f"{edit_count} changes" if edit_count > 0 else "multiple changes"
+            )
 
             if simplified:
                 if file_path:
@@ -484,6 +486,41 @@ class ConversationMonitor:
 
         return extension_map.get(ext, "")
 
+    def _create_diff(
+        self, old_string: str, new_string: str, file_path: str = ""
+    ) -> str:
+        """Create a unified diff between old and new strings."""
+        import difflib
+
+        # Split strings into lines for difflib
+        old_lines = old_string.splitlines(keepends=True)
+        new_lines = new_string.splitlines(keepends=True)
+
+        # Ensure lines end with newline for proper diff formatting
+        if old_lines and not old_lines[-1].endswith("\n"):
+            old_lines[-1] += "\n"
+        if new_lines and not new_lines[-1].endswith("\n"):
+            new_lines[-1] += "\n"
+
+        # Generate unified diff
+        diff_lines = difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile=f"{file_path} (before)",
+            tofile=f"{file_path} (after)",
+            n=3,  # Context lines
+        )
+
+        # Convert generator to list and join
+        diff_content = "".join(diff_lines)
+
+        # If diff is empty (strings are identical), show a message
+        if not diff_content:
+            return "# No changes detected"
+
+        # Remove trailing newlines to avoid excessive spacing
+        return diff_content.rstrip()
+
     def _format_hook_notification(self, notification: Dict[str, Any]) -> Optional[str]:
         """Format hook notification for display."""
         notif_type = notification.get("type")
@@ -506,7 +543,9 @@ class ConversationMonitor:
                 message = "💻 **Bash**"
                 if description:
                     message += f" - {description}"
-                message += f"\n```bash\n{command}\n```"
+                # Escape backticks in command to prevent breaking the code block
+                command_escaped = command.replace("```", "\\`\\`\\`")
+                message += f"\n```bash\n{command_escaped}\n```"
                 return message
 
             elif tool_name == "LS":
@@ -526,23 +565,34 @@ class ConversationMonitor:
                 # Format the code changes
                 message = f"✏️ **Editing:** `{file_path}`\n"
 
-                # Show full old code
-                if old_string:
-                    message += f"\n**Removing:**\n```{lang}\n{old_string}\n```\n"
+                # If both old and new strings exist, create a diff
+                if old_string and new_string:
+                    diff_content = self._create_diff(old_string, new_string, file_path)
+                    # Escape backticks in diff to prevent breaking the code block
+                    diff_content_escaped = diff_content.replace("```", "\\`\\`\\`")
+                    message += f"\n**Changes:**\n```diff\n{diff_content_escaped}\n```"
+                else:
+                    # Show full old code
+                    if old_string:
+                        old_string_escaped = old_string.replace("```", "\\`\\`\\`")
+                        message += (
+                            f"\n**Removing:**\n```{lang}\n{old_string_escaped}\n```\n"
+                        )
 
-                # Show full new code
-                if new_string:
-                    message += f"\n**Adding:**\n```{lang}\n{new_string}\n```"
+                    # Show full new code
+                    if new_string:
+                        new_string_escaped = new_string.replace("```", "\\`\\`\\`")
+                        message += (
+                            f"\n**Adding:**\n```{lang}\n{new_string_escaped}\n```"
+                        )
 
                 return message
 
             elif tool_name == "TodoWrite":
                 # VERIFIED: {"todos": [{"content": "...", "status": "...", "priority": "...", "id": "..."}]}
                 todos = params.get("todos", [])
-                todo_count = len(todos)
-
                 # Build detailed todo list
-                message = f"📝 **Managing todos:**\n"
+                message = "📝 **Managing todos:**\n"
 
                 if todos:
                     message += "\n**Todo List:**\n"
@@ -596,7 +646,9 @@ class ConversationMonitor:
                 # Format the message with full content
                 message = f"✍️ **Writing:** `{file_path}`\n"
                 if content:
-                    message += f"\n**Content:**\n```{lang}\n{content}\n```"
+                    # Escape backticks in content to prevent breaking the code block
+                    content_escaped = content.replace("```", "\\`\\`\\`")
+                    message += f"\n**Content:**\n```{lang}\n{content_escaped}\n```"
 
                 return message
 
@@ -610,7 +662,9 @@ class ConversationMonitor:
                 message = f"🔍 **Searching in:** `{path}`"
                 if output_mode != "files_with_matches":
                     message += f" ({output_mode})"
-                message += f"\n```regex\n{pattern}\n```"
+                # Escape backticks in pattern to prevent breaking the code block
+                pattern_escaped = pattern.replace("```", "\\`\\`\\`")
+                message += f"\n```regex\n{pattern_escaped}\n```"
                 return message
 
             elif tool_name == "Glob":
@@ -635,10 +689,27 @@ class ConversationMonitor:
                     new_string = edit.get("new_string", "")
 
                     message += f"\n**Edit {i}:**"
-                    if old_string:
-                        message += f"\n**Removing:**\n```{lang}\n{old_string}\n```"
-                    if new_string:
-                        message += f"\n**Adding:**\n```{lang}\n{new_string}\n```"
+
+                    # If both old and new strings exist, create a diff
+                    if old_string and new_string:
+                        diff_content = self._create_diff(
+                            old_string, new_string, file_path
+                        )
+                        # Escape backticks in diff to prevent breaking the code block
+                        diff_content_escaped = diff_content.replace("```", "\\`\\`\\`")
+                        message += f"\n```diff\n{diff_content_escaped}\n```"
+                    else:
+                        if old_string:
+                            old_string_escaped = old_string.replace("```", "\\`\\`\\`")
+                            message += (
+                                f"\n**Removing:**\n```{lang}\n{old_string_escaped}\n```"
+                            )
+                        if new_string:
+                            new_string_escaped = new_string.replace("```", "\\`\\`\\`")
+                            message += (
+                                f"\n**Adding:**\n```{lang}\n{new_string_escaped}\n```"
+                            )
+
                     if i < len(edits):
                         message += "\n"
 
@@ -655,6 +726,7 @@ class ConversationMonitor:
 
         elif notif_type == "post_tool_use":
             tool_name = notification.get("tool_name", "Unknown")
+            tool_response = notification.get("tool_response", {})
 
             # Format based on tool type with completion status
             if tool_name == "Edit":
@@ -664,7 +736,20 @@ class ConversationMonitor:
             elif tool_name == "Read":
                 return None  # Silenced for better UX
             elif tool_name == "Bash":
-                return "✅ **Command completed**"
+                # For Bash commands, include the output
+                message = "✅ **Command completed**"
+
+                # Extract stdout and stderr from the tool response
+                if isinstance(tool_response, dict):
+                    stdout = tool_response.get("stdout", "").strip()
+                    stderr = tool_response.get("stderr", "").strip()
+
+                    if stdout:
+                        message += f"\n\n**Output:**\n```\n{stdout}\n```"
+                    if stderr:
+                        message += f"\n\n**Error output:**\n```\n{stderr}\n```"
+
+                return message
             elif tool_name == "Grep":
                 return "✅ **Search completed**"
             elif tool_name == "Glob":
