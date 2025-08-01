@@ -249,16 +249,29 @@ class ConversationMonitor:
             formatted_message = self._format_hook_notification(notification)
 
             if formatted_message:
+                # Include tool information for signature-based matching
+                message_data = {
+                    "type": "hook_notification",
+                    "role": "system",
+                    "content": formatted_message,
+                    "timestamp": notification.get(
+                        "timestamp", datetime.now().isoformat()
+                    ),
+                }
+
+                # Add tool information for pre/post matching
+                if notification.get("type") in ["pre_tool_use", "post_tool_use"]:
+                    message_data.update(
+                        {
+                            "tool_name": notification.get("tool_name"),
+                            "tool_params": notification.get("parameters", {}),
+                            "notification_type": notification.get("type"),
+                        }
+                    )
+
                 payload = {
                     "session_id": notification.get("session_id", "unknown"),
-                    "message": {
-                        "type": "hook_notification",
-                        "role": "system",
-                        "content": formatted_message,
-                        "timestamp": notification.get(
-                            "timestamp", datetime.now().isoformat()
-                        ),
-                    },
+                    "message": message_data,
                     "timestamp": datetime.now().isoformat(),
                 }
 
@@ -276,8 +289,10 @@ class ConversationMonitor:
             context = dialog_data.get("context", {})
             message = dialog_data.get("message", "")
 
-            # Build context-aware question
-            question = self._build_permission_question(message, context)
+            # Build context-aware question (always simplified to avoid duplication)
+            question = self._build_permission_question(
+                message, context, simplified=True
+            )
 
             payload = {
                 "session_id": dialog_data.get("session_id", "unknown"),
@@ -299,7 +314,9 @@ class ConversationMonitor:
         except Exception as e:
             logger.error("Error sending permission dialog", error=str(e))
 
-    def _build_permission_question(self, message: str, context: Dict[str, Any]) -> str:
+    def _build_permission_question(
+        self, message: str, context: Dict[str, Any], simplified: bool = False
+    ) -> str:
         """Build a context-aware permission question for the user."""
         base_message = message or "Claude needs your permission"
 
@@ -314,36 +331,95 @@ class ConversationMonitor:
         # Detect programming language from file extension
         lang = self._detect_language(file_path)
 
-        # Build detailed question based on context
-        if tool_use == "Edit":
-            question = f"🔐 **Permission Required**\n\n{base_message}"
-            if file_path:
-                question += f"\n\n📂 **File:** `{file_path}`"
-            if code_snippet:
-                # Show full code snippet, no truncation
-                question += f"\n\n**Code to replace:**\n```{lang}\n{code_snippet}\n```"
-            if new_code:
-                # Show full new code, no truncation
-                question += f"\n\n**New code:**\n```{lang}\n{new_code}\n```"
+        # Build question based on context and whether it's simplified
+        if tool_use in ["Edit", "Update"]:
+            if simplified:
+                if file_path:
+                    # Simplified version: just show permission request and filename
+                    question = f"🔐 **Permission Required**\n\nClaude needs permission to edit `{file_path}`"
+                else:
+                    # Simplified version without filename
+                    question = "🔐 **Permission Required**\n\nClaude needs permission to edit a file"
+            else:
+                # Full version: show all code details
+                question = f"🔐 **Permission Required**\n\n{base_message}"
+                if file_path:
+                    question += f"\n\n📂 **File:** `{file_path}`"
+                if code_snippet:
+                    # Show full code snippet, no truncation
+                    question += (
+                        f"\n\n**Code to replace:**\n```{lang}\n{code_snippet}\n```"
+                    )
+                if new_code:
+                    # Show full new code, no truncation
+                    question += f"\n\n**New code:**\n```{lang}\n{new_code}\n```"
 
         elif tool_use == "Write":
-            question = f"🔐 **Permission Required**\n\n{base_message}"
-            if file_path:
-                question += f"\n\n📂 **File:** `{file_path}`"
-            if code_snippet:
-                # Show full content, no truncation
-                question += f"\n\n**Content to write:**\n```{lang}\n{code_snippet}\n```"
+            if simplified:
+                if file_path:
+                    # Simplified version: just show permission request and filename
+                    question = f"🔐 **Permission Required**\n\nClaude needs permission to write `{file_path}`"
+                else:
+                    # Simplified version without filename
+                    question = "🔐 **Permission Required**\n\nClaude needs permission to write a file"
+            else:
+                # Full version: show all content details
+                question = f"🔐 **Permission Required**\n\n{base_message}"
+                if file_path:
+                    question += f"\n\n📂 **File:** `{file_path}`"
+                if code_snippet:
+                    # Show full content, no truncation
+                    question += (
+                        f"\n\n**Content to write:**\n```{lang}\n{code_snippet}\n```"
+                    )
 
         elif tool_use == "Bash":
+            # Always show full command for bash (they're short anyway)
             question = f"🔐 **Permission Required**\n\n{base_message}"
             if code_snippet:
                 # Show full command in code block
                 question += f"\n\n**Command to execute:**\n```bash\n{code_snippet}\n```"
 
+        elif tool_use == "MultiEdit":
+            # Get edit count from context if available
+            edit_count = context.get("edit_count", 0)
+            edit_text = f"{edit_count} changes" if edit_count > 0 else "multiple changes"
+
+            if simplified:
+                if file_path:
+                    # Simplified version: show permission request, filename, and edit count
+                    question = f"🔐 **Permission Required**\n\nClaude needs permission to edit `{file_path}` ({edit_text})"
+                else:
+                    # Simplified version without filename but with edit count
+                    question = f"🔐 **Permission Required**\n\nClaude needs permission to edit a file ({edit_text})"
+            else:
+                # Full version for MultiEdit with edit details
+                question = f"🔐 **Permission Required**\n\n{base_message}"
+                if file_path:
+                    question += f"\n\n📂 **File:** `{file_path}` ({edit_text})"
+
+                # Show preview of first edit if available and not too long
+                if code_snippet and len(code_snippet) < 200:
+                    lang = self._detect_language(file_path)
+                    question += f"\n\n**First change preview:**\n```{lang}\n{code_snippet[:200]}...\n```"
+
         else:
-            question = f"🔐 **Permission Required**\n\n{base_message}"
-            if file_path:
-                question += f"\n\n📂 **File:** `{file_path}`"
+            # Generic tool or unknown
+            if simplified:
+                if file_path:
+                    # Try to provide a generic simplified message with filename
+                    question = f"🔐 **Permission Required**\n\nClaude needs permission to use {tool_use} on `{file_path}`"
+                elif tool_use:
+                    # Just show tool name if available
+                    question = f"🔐 **Permission Required**\n\nClaude needs permission to use {tool_use}"
+                else:
+                    # Fallback to base message
+                    question = f"🔐 **Permission Required**\n\n{base_message}"
+            else:
+                # Full context version
+                question = f"🔐 **Permission Required**\n\n{base_message}"
+                if file_path:
+                    question += f"\n\n📂 **File:** `{file_path}`"
 
         return question
 
@@ -445,7 +521,7 @@ class ConversationMonitor:
                 new_string = params.get("new_string", "")
 
                 # Get file language for syntax highlighting
-                lang = self._get_file_language(file_path)
+                lang = self._detect_language(file_path)
 
                 # Format the code changes
                 message = f"✏️ **Editing:** `{file_path}`\n"
@@ -464,7 +540,35 @@ class ConversationMonitor:
                 # VERIFIED: {"todos": [{"content": "...", "status": "...", "priority": "...", "id": "..."}]}
                 todos = params.get("todos", [])
                 todo_count = len(todos)
-                return f"📝 **Managing todos:** {todo_count} items"
+
+                # Build detailed todo list
+                message = f"📝 **Managing todos:**\n"
+
+                if todos:
+                    message += "\n**Todo List:**\n"
+                    for todo in todos:
+                        content = todo.get("content", "")
+                        status = todo.get("status", "unknown")
+                        priority = todo.get("priority", "")
+
+                        # Status emoji mapping
+                        status_emoji = {
+                            "pending": "⏳",
+                            "in_progress": "🔄",
+                            "completed": "✅",
+                        }.get(status, "❓")
+
+                        # Priority indicator
+                        priority_indicator = ""
+                        if priority == "high":
+                            priority_indicator = " 🔥"
+                        elif priority == "medium":
+                            priority_indicator = " ⚡"
+
+                        # Format each todo item
+                        message += f"{status_emoji} {content}{priority_indicator}\n"
+
+                return message.rstrip()
 
             elif tool_name == "Read":
                 # VERIFIED: {"file_path": "/path/to/file", "offset": 162, "limit": 20}
@@ -487,7 +591,7 @@ class ConversationMonitor:
                 content = params.get("content", "")
 
                 # Get file language for syntax highlighting
-                lang = self._get_file_language(file_path)
+                lang = self._detect_language(file_path)
 
                 # Format the message with full content
                 message = f"✍️ **Writing:** `{file_path}`\n"
@@ -520,7 +624,7 @@ class ConversationMonitor:
                 edits = params.get("edits", [])
 
                 # Get file language for syntax highlighting
-                lang = self._get_file_language(file_path)
+                lang = self._detect_language(file_path)
 
                 # Format the message
                 message = f"✏️ **Multi-editing:** `{file_path}` ({len(edits)} changes)\n"
@@ -558,7 +662,7 @@ class ConversationMonitor:
             elif tool_name == "Write":
                 return "✅ **File created**"
             elif tool_name == "Read":
-                return "✅ **Read completed**"
+                return None  # Silenced for better UX
             elif tool_name == "Bash":
                 return "✅ **Command completed**"
             elif tool_name == "Grep":

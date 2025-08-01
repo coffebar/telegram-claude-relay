@@ -108,6 +108,8 @@ make help        # Show available commands
 4. Bot processes updates and sends them back to Telegram
 5. You see Claude's responses and tool usage in real-time
 
+The bot now includes comprehensive tool transparency with specific formatting for each Claude tool (Bash, Edit, Read, Write, etc.), making it easy to see exactly what Claude is doing at each step.
+
 ### Claude Code Hooks Integration
 
 Track ALL Claude activity including:
@@ -161,6 +163,11 @@ tmux send-keys -t claude-session "claude" Enter
   - Check `~/.claude/settings.json` on startup
   - Warn user if hooks are missing or misconfigured
   - Provide setup instructions
+- [ ] Diff format for code edits?
+
+### Optimizations
+
+- [ ] Disable logging when not debugging
 
 ### Tool Usage Transparency
 

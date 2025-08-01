@@ -1,7 +1,5 @@
 """Webhook handler for receiving Claude hook events and providing live status updates."""
 
-import asyncio
-
 from typing import Any, Dict, Optional
 
 import structlog
@@ -21,12 +19,27 @@ class MessageTracker:
     def __init__(self):
         self.last_status_messages: Dict[int, Dict[str, Any]] = (
             {}
-        )  # user_id -> {message_id, chat_id, type}
+        )  # user_id -> {message_id, chat_id, type, content}
+        self.pending_tool_operations: Dict[str, Dict[str, Any]] = (
+            {}
+        )  # "session_id:tool_name" -> {user_id, message_id, chat_id, content, timestamp, tool_name, message_series}
 
-    def get_message_type(self, message: str) -> str:
-        """Determine the type of message based on content."""
+    def get_message_type(
+        self, message: str, original_message: Dict[str, Any] = None
+    ) -> str:
+        """Determine the type of message based on content and context."""
         if "💬 **New Prompt:**" in message:
             return "prompt"
+        elif "📝 **Managing todos:**" in message:
+            # Check if this is a TodoWrite from a pre/post tool hook
+            if original_message and original_message.get("tool_name") == "TodoWrite":
+                notification_type = original_message.get("notification_type")
+                if notification_type == "pre_tool_use":
+                    return "pre_tool"
+                elif notification_type == "post_tool_use":
+                    return "post_tool"
+            # Otherwise it's a regular todo list message
+            return "todo_list"  # Special type for TodoWrite - always send new message
         elif any(prefix in message for prefix in ["✏️", "📝", "👁️", "💻", "🔍", "🔧"]):
             return "pre_tool"
         elif "✅" in message:
@@ -56,21 +69,17 @@ class MessageTracker:
 
         last_type = last_msg.get("type")
 
-        # Clear status tracking for new prompts or responses (start fresh)
-        if message_type in ["prompt", "response"]:
-            logger.debug("Clearing status tracking for new prompt/response")
+        # Clear status tracking for new prompts, responses, or todo lists (start fresh)
+        if message_type in ["prompt", "response", "todo_list"]:
+            logger.debug("Clearing status tracking for new prompt/response/todo_list")
             self.last_status_messages.pop(user_id, None)
             return False, None
 
-        # Edit if both are tool-related messages
-        if message_type in ["pre_tool", "post_tool"] and last_type in [
-            "pre_tool",
-            "post_tool",
-        ]:
-            logger.debug(
-                "Will edit last message", last_msg_id=last_msg.get("message_id")
-            )
-            return True, last_msg
+        # For tool-related messages, we now use signature-based matching instead of timing
+        # This handles cases where tools take minutes to complete
+        if message_type in ["pre_tool", "post_tool"]:
+            logger.debug("Tool message detected, using signature-based matching")
+            return False, None  # Will be handled by signature-based logic
 
         logger.debug(
             "Will send new message",
@@ -78,8 +87,120 @@ class MessageTracker:
         )
         return False, None
 
+    def create_tool_signature(self, tool_name: str, tool_params: Dict[str, Any]) -> str:
+        """Create a unique signature for a tool operation based on its parameters."""
+        import hashlib
+        import json
+
+        # Create a consistent string representation of the tool and its parameters
+        # NOTE: Do NOT include timestamp - pre and post hooks need the same signature
+        signature_data = {"tool": tool_name, "params": tool_params}
+
+        # Convert to JSON string and hash it
+        signature_str = json.dumps(signature_data, sort_keys=True)
+        return hashlib.md5(signature_str.encode()).hexdigest()[
+            :12
+        ]  # Longer hash for better uniqueness
+
+    def register_tool_operation(
+        self,
+        session_id: str,
+        user_id: int,
+        message_id: int,
+        chat_id: int,
+        content: str,
+        tool_name: str,
+    ) -> None:
+        """Register a pre_tool operation for later matching with post_tool."""
+        import time
+
+        # Create composite key: session_id:tool_name for precise matching
+        operation_key = f"{session_id}:{tool_name}"
+
+        self.pending_tool_operations[operation_key] = {
+            "user_id": user_id,
+            "message_id": message_id,
+            "chat_id": chat_id,
+            "content": content,
+            "tool_name": tool_name,
+            "timestamp": time.time(),
+        }
+
+        logger.info(
+            "Registered tool operation",
+            operation_key=operation_key,
+            session_id=session_id,
+            tool_name=tool_name,
+            user_id=user_id,
+            message_id=message_id,
+        )
+
+    def find_matching_tool_operation(
+        self, session_id: str, tool_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Find the matching pre_tool operation for a post_tool (without removing it yet)."""
+        # Create composite key: session_id:tool_name for precise matching
+        operation_key = f"{session_id}:{tool_name}"
+        operation = self.pending_tool_operations.get(operation_key)
+
+        if operation:
+            logger.info(
+                "Found matching tool operation",
+                operation_key=operation_key,
+                session_id=session_id,
+                tool_name=tool_name,
+                user_id=operation["user_id"],
+                message_id=operation["message_id"],
+            )
+        else:
+            logger.warning(
+                "No matching pre_tool operation found",
+                operation_key=operation_key,
+                session_id=session_id,
+                tool_name=tool_name,
+                pending_count=len(self.pending_tool_operations),
+                pending_operations=list(self.pending_tool_operations.keys()),
+            )
+
+        return operation
+
+    def remove_tool_operation(self, session_id: str, tool_name: str) -> None:
+        """Remove a tool operation after successful processing."""
+        operation_key = f"{session_id}:{tool_name}"
+        removed_operation = self.pending_tool_operations.pop(operation_key, None)
+        if removed_operation:
+            logger.info(
+                "Removed processed tool operation",
+                operation_key=operation_key,
+                session_id=session_id,
+                tool_name=tool_name,
+            )
+
+    def cleanup_old_operations(self, max_age_seconds: int = 600) -> None:
+        """Clean up tool operations older than max_age_seconds (default 10 minutes)."""
+        import time
+
+        current_time = time.time()
+
+        expired_operations = [
+            operation_key
+            for operation_key, op in self.pending_tool_operations.items()
+            if current_time - op["timestamp"] > max_age_seconds
+        ]
+
+        for operation_key in expired_operations:
+            del self.pending_tool_operations[operation_key]
+            logger.info(
+                "Cleaned up expired tool operation", operation_key=operation_key
+            )
+
     def track_message(
-        self, user_id: int, message_id: int, chat_id: int, message_type: str
+        self,
+        user_id: int,
+        message_id: int,
+        chat_id: int,
+        message_type: str,
+        content: str = "",
     ) -> None:
         """Track a message for potential editing."""
         if message_type in ["pre_tool", "post_tool"]:
@@ -87,6 +208,7 @@ class MessageTracker:
                 "message_id": message_id,
                 "chat_id": chat_id,
                 "type": message_type,
+                "content": content,
             }
 
 
@@ -147,7 +269,7 @@ class ConversationWebhookHandler:
                         msg_len=len(formatted_message),
                     )
                     # Send to all active chats for this session
-                    await self._send_to_telegram(session_id, formatted_message)
+                    await self._send_to_telegram(session_id, formatted_message, message)
                 else:
                     logger.info(
                         "Message filtered out during formatting",
@@ -176,10 +298,7 @@ class ConversationWebhookHandler:
             return f"💭 _Thinking: {content}_"
 
         elif msg_type == "message" and role == "assistant":
-            # Regular Claude response
-            if len(content) > 3000:
-                # Truncate very long messages
-                content = content[:3000] + "\n\n... (truncated)"
+            # Regular Claude response - will be handled by message splitting in _send_new_message
             return f"🤖 **Claude:**\n{content}"
 
         elif msg_type == "message" and role == "user":
@@ -248,8 +367,10 @@ class ConversationWebhookHandler:
 
         return "\n".join(formatted)
 
-    async def _send_to_telegram(self, session_id: str, message: str) -> None:
-        """Send message to all relevant Telegram chats, editing status messages when possible."""
+    async def _send_to_telegram(
+        self, session_id: str, message: str, original_message: Dict[str, Any] = None
+    ) -> None:
+        """Send message to all relevant Telegram chats, with signature-based tool matching."""
         # Send to all subscribed users
         # If no users are subscribed yet, fall back to allowed users
         users_to_notify = (
@@ -258,79 +379,385 @@ class ConversationWebhookHandler:
             else (self.settings.allowed_users or [])
         )
 
-        # Determine message type
-        message_type = self.message_tracker.get_message_type(message)
+        # Determine message type with context from original message
+        message_type = self.message_tracker.get_message_type(message, original_message)
 
         logger.debug(
             "Processing webhook message",
             message_type=message_type,
             user_count=len(users_to_notify),
             message_preview=message[:50],
+            has_original_message=bool(original_message),
+            original_message_keys=(
+                list(original_message.keys()) if original_message else []
+            ),
         )
 
         for user_id in users_to_notify:
             try:
-                # Check if we should edit the last message or send a new one
-                should_edit, last_msg = self.message_tracker.should_edit_last_message(
-                    user_id, message_type
+                await self._handle_message_for_user(
+                    user_id, message, message_type, original_message, session_id
                 )
-
-                if should_edit and last_msg:
-                    # Edit the existing message
-                    try:
-                        logger.debug(
-                            "Attempting to edit message",
-                            user_id=user_id,
-                            message_id=last_msg["message_id"],
-                            message_preview=message[:50],
-                        )
-                        edited_msg = await self.bot.edit_message_text(
-                            chat_id=last_msg["chat_id"],
-                            message_id=last_msg["message_id"],
-                            text=message,
-                            parse_mode=ParseMode.MARKDOWN,
-                        )
-                        logger.debug(
-                            "Successfully edited message",
-                            user_id=user_id,
-                            message_id=edited_msg.message_id,
-                        )
-                        # Update the stored message info
-                        self.message_tracker.track_message(
-                            user_id, edited_msg.message_id, user_id, message_type
-                        )
-                        # Small delay to prevent rate limiting
-                        await asyncio.sleep(0.1)
-                    except Exception as edit_error:
-                        logger.warning(
-                            "Failed to edit message, sending new one",
-                            user_id=user_id,
-                            message_id=last_msg.get("message_id"),
-                            error=str(edit_error),
-                        )
-                        # Fall back to sending a new message
-                        await self._send_new_message(user_id, message, message_type)
-                else:
-                    # Send a new message
-                    await self._send_new_message(user_id, message, message_type)
-
             except Exception as e:
                 logger.warning(
                     "Failed to send update to user", user_id=user_id, error=str(e)
                 )
 
+    async def _handle_message_for_user(
+        self,
+        user_id: int,
+        message: str,
+        message_type: str,
+        original_message: Dict[str, Any] = None,
+        session_id: str = "",
+    ) -> None:
+        """Handle message for a specific user with signature-based tool matching."""
+
+        # Check if this is a tool-related message
+        if message_type in ["pre_tool", "post_tool"] and original_message:
+            tool_name = original_message.get("tool_name")
+            tool_params = original_message.get("tool_params", {})
+
+            logger.info(
+                "Processing tool message",
+                message_type=message_type,
+                tool_name=tool_name,
+                has_tool_params=bool(tool_params),
+                tool_params_keys=list(tool_params.keys()) if tool_params else [],
+                original_message_keys=(
+                    list(original_message.keys()) if original_message else []
+                ),
+            )
+
+            if tool_name and session_id:
+                logger.info(
+                    "Processing tool message with session-based matching",
+                    message_type=message_type,
+                    tool_name=tool_name,
+                    session_id=session_id,
+                    has_tool_params=bool(tool_params),
+                )
+
+                if message_type == "pre_tool":
+                    # Register the operation IMMEDIATELY to prevent race conditions
+                    # (we'll update with the actual message_id after sending)
+                    temp_operation_key = f"{session_id}:{tool_name}"
+                    self.message_tracker.pending_tool_operations[temp_operation_key] = {
+                        "user_id": user_id,
+                        "message_id": 0,  # Temporary, will be updated
+                        "chat_id": user_id,
+                        "content": message,
+                        "tool_name": tool_name,
+                        "timestamp": __import__("time").time(),
+                    }
+
+                    logger.info(
+                        "Pre-registered tool operation (immediate)",
+                        operation_key=temp_operation_key,
+                        session_id=session_id,
+                        tool_name=tool_name,
+                        user_id=user_id,
+                    )
+
+                    # Send new message (potentially as series)
+                    try:
+                        # Debug: Log the exact message content being sent to Telegram
+                        logger.info(
+                            "About to send pre_tool message to Telegram",
+                            operation_key=temp_operation_key,
+                            message_length=len(message),
+                            message_content=message[
+                                :500
+                            ],  # First 500 chars to avoid log spam
+                            message_preview=repr(
+                                message[:100]
+                            ),  # Show special characters
+                        )
+
+                        # Send message series if needed
+                        result = await self._send_message_series(user_id, message)
+
+                        # Update the operation with the actual message_id IMMEDIATELY after sending
+                        # This prevents race conditions where post-tool arrives before update
+                        if (
+                            temp_operation_key
+                            in self.message_tracker.pending_tool_operations
+                        ):
+                            self.message_tracker.pending_tool_operations[
+                                temp_operation_key
+                            ]["message_id"] = result["last_message_id"]
+                            # Store the last message content for consistent editing
+                            self.message_tracker.pending_tool_operations[
+                                temp_operation_key
+                            ]["content"] = result["last_content"]
+                            # Store the message series info
+                            self.message_tracker.pending_tool_operations[
+                                temp_operation_key
+                            ]["message_series"] = result["message_series"]
+
+                            logger.info(
+                                "Updated tool operation with message_id",
+                                operation_key=temp_operation_key,
+                                message_id=result["last_message_id"],
+                                total_parts=result["total_parts"],
+                                sent_parts=result["sent_parts"],
+                            )
+                        else:
+                            logger.warning(
+                                "Tool operation was removed by post-tool before message_id update",
+                                operation_key=temp_operation_key,
+                                message_id=result.get("last_message_id", "unknown"),
+                            )
+                    except Exception as send_error:
+                        # If message sending fails, remove the registered operation
+                        self.message_tracker.pending_tool_operations.pop(
+                            temp_operation_key, None
+                        )
+
+                        logger.warning(
+                            "Failed to send pre_tool message, removed registered operation",
+                            operation_key=temp_operation_key,
+                            error=str(send_error),
+                        )
+
+                        # Don't re-raise the error - instead return early to avoid further processing
+                        return
+
+                elif message_type == "post_tool":
+                    # Find matching pre_tool operation
+                    matching_operation = (
+                        self.message_tracker.find_matching_tool_operation(
+                            session_id, tool_name
+                        )
+                    )
+
+                    # Wait for valid message_id if operation was just created
+                    if matching_operation:
+                        # If message_id is 0, the pre-tool message might still be sending
+                        # Give it a moment to complete
+                        if matching_operation.get("message_id", 0) == 0:
+                            import asyncio
+
+                            await asyncio.sleep(0.1)  # Brief wait for message_id update
+                            # Re-fetch the operation to get updated message_id
+                            matching_operation = (
+                                self.message_tracker.find_matching_tool_operation(
+                                    session_id, tool_name
+                                )
+                            )
+
+                        if (
+                            matching_operation
+                            and matching_operation.get("message_id", 0) > 0
+                        ):
+                            # Edit the existing pre_tool message to append completion status
+                            try:
+                                pre_tool_content = matching_operation["content"]
+                                combined_message = f"{pre_tool_content}\n\n{message}"
+
+                                # Sanitize message for Telegram Markdown parsing
+                                sanitized_message = self._sanitize_markdown(
+                                    combined_message
+                                )
+
+                                await self.bot.edit_message_text(
+                                    chat_id=matching_operation["chat_id"],
+                                    message_id=matching_operation["message_id"],
+                                    text=sanitized_message,
+                                    parse_mode=ParseMode.MARKDOWN,
+                                )
+
+                                logger.info(
+                                    "Successfully combined pre/post tool messages",
+                                    session_id=session_id,
+                                    tool_name=tool_name,
+                                    user_id=user_id,
+                                    message_id=matching_operation["message_id"],
+                                )
+
+                                # Remove the operation after successful processing
+                                self.message_tracker.remove_tool_operation(
+                                    session_id, tool_name
+                                )
+
+                            except Exception as edit_error:
+                                logger.warning(
+                                    "Failed to edit pre_tool message, sending new post_tool message",
+                                    session_id=session_id,
+                                    tool_name=tool_name,
+                                    message_id=matching_operation.get("message_id"),
+                                    error=str(edit_error),
+                                )
+                                # Fallback: send as new message
+                                await self._send_new_message(
+                                    user_id, message, message_type
+                                )
+                    else:
+                        # No matching pre_tool found, send as new message
+                        logger.warning(
+                            "No matching pre_tool operation found for post_tool",
+                            session_id=session_id,
+                            tool_name=tool_name,
+                        )
+                        await self._send_new_message(user_id, message, message_type)
+
+                # Clean up old operations periodically
+                self.message_tracker.cleanup_old_operations()
+                return
+
+        # For non-tool messages or tool messages without proper signature data
+        await self._send_new_message(user_id, message, message_type)
+
+    def _sanitize_markdown(self, text: str) -> str:
+        """Sanitize text to prevent Telegram Markdown parsing errors while preserving formatting."""
+        import re
+
+        # Only apply minimal sanitization to prevent parsing errors, not full escaping
+        # This preserves intended Markdown formatting while fixing edge cases
+        # Fix unmatched backticks that break parsing
+        # Count backticks and ensure they're properly paired
+        backtick_count = text.count("`")
+        if backtick_count % 2 == 1:
+            # Odd number of backticks - escape the last one to prevent parsing errors
+            last_backtick_pos = text.rfind("`")
+            if last_backtick_pos != -1:
+                text = text[:last_backtick_pos] + "\\`" + text[last_backtick_pos + 1 :]
+
+        # Fix unmatched code block markers
+        code_block_starts = text.count("```")
+        if code_block_starts % 2 == 1:
+            # Odd number of code block markers - add closing marker
+            if not text.endswith("\n"):
+                text += "\n"
+            text += "```"
+
+        # Only escape characters that commonly break Telegram parsing in specific contexts
+        # Don't escape formatting characters like *, _, #, etc. as they're intentional
+
+        # Fix problematic character sequences that break entity parsing
+        # These are edge cases found in logs, not general Markdown escaping
+        text = re.sub(
+            r"([^\\])(\[)([^\]]*?)(\])\(([^)]*?)\)", r"\1\\\2\3\\\4(\5)", text
+        )  # Fix problematic links
+        text = re.sub(r"(\w)([<>])(\w)", r"\1\\\2\3", text)  # Escape < > between words
+
+        return text
+
+    def _split_long_message(self, text: str, max_length: int = 3900) -> list[str]:
+        """Split long messages into multiple parts while preserving formatting and structure."""
+        if len(text) <= max_length:
+            return [text]
+
+        parts = []
+        remaining = text
+
+        while len(remaining) > max_length:
+            # Find a good split point (prefer line breaks, then spaces)
+            split_point = max_length
+
+            # Try to split at line break
+            last_newline = remaining.rfind("\n", 0, max_length)
+            if last_newline > max_length * 0.7:  # Don't split too early
+                split_point = last_newline + 1
+            else:
+                # Try to split at space
+                last_space = remaining.rfind(" ", 0, max_length)
+                if last_space > max_length * 0.8:  # Don't split too early
+                    split_point = last_space + 1
+
+            # Extract the part
+            part = remaining[:split_point]
+
+            # Handle code blocks - ensure they're properly closed/opened
+            if "```" in part:
+                open_blocks = part.count("```") % 2
+                if open_blocks == 1:
+                    # Close the code block in this part
+                    part += "\n```"
+                    # Open it in the next part
+                    remaining = "```\n" + remaining[split_point:]
+                else:
+                    remaining = remaining[split_point:]
+            else:
+                remaining = remaining[split_point:]
+
+            parts.append(part.rstrip())
+
+        # Add the final part
+        if remaining.strip():
+            parts.append(remaining.strip())
+
+        return parts
+
+    async def _send_message_series(
+        self, user_id: int, message: str, parse_mode=ParseMode.MARKDOWN
+    ) -> dict:
+        """Send a message as a series if it's too long, return info about the last message."""
+        # Sanitize message for Telegram Markdown parsing
+        sanitized_message = self._sanitize_markdown(message)
+
+        # Split message if needed
+        message_parts = self._split_long_message(sanitized_message)
+
+        sent_messages = []
+        for i, part in enumerate(message_parts):
+            try:
+                sent_msg = await self.bot.send_message(
+                    chat_id=user_id, text=part, parse_mode=parse_mode
+                )
+                sent_messages.append(
+                    {
+                        "message_id": sent_msg.message_id,
+                        "content": part,
+                        "part_number": i + 1,
+                        "total_parts": len(message_parts),
+                    }
+                )
+
+                # Small delay between messages to avoid rate limiting
+                if i < len(message_parts) - 1:
+                    import asyncio
+
+                    await asyncio.sleep(0.1)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to send message part {i+1}/{len(message_parts)}",
+                    error=str(e),
+                )
+                # If sending fails, return info about the last successful message
+                break
+
+        if not sent_messages:
+            raise Exception("Failed to send any message parts")
+
+        # Return info about the series, focusing on the last message for editing
+        last_message = sent_messages[-1]
+        return {
+            "last_message_id": last_message["message_id"],
+            "last_content": last_message["content"],
+            "message_series": sent_messages,
+            "total_parts": len(message_parts),
+            "sent_parts": len(sent_messages),
+        }
+
     async def _send_new_message(
         self, user_id: int, message: str, message_type: str
     ) -> None:
         """Send a new message and track it."""
-        sent_msg = await self.bot.send_message(
-            chat_id=user_id, text=message, parse_mode=ParseMode.MARKDOWN
-        )
+        try:
+            result = await self._send_message_series(user_id, message)
 
-        # Store the message info for potential editing
-        self.message_tracker.track_message(
-            user_id, sent_msg.message_id, user_id, message_type
-        )
+            # Store the message info for potential editing (use last message for editing)
+            self.message_tracker.track_message(
+                user_id,
+                result["last_message_id"],
+                user_id,
+                message_type,
+                result["last_content"],
+            )
+        except Exception as e:
+            logger.error(f"Failed to send new message: {str(e)}")
 
     async def _send_permission_dialog(
         self, session_id: str, message: Dict[str, Any]
