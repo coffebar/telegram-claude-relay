@@ -110,21 +110,11 @@ make help        # Show available commands
 
 ### Claude Code Hooks Integration
 
-Track ALL Claude activity including thinking steps:
+Track ALL Claude activity including:
 
-1. **Setup Claude Code hooks**:
-   - Create or edit `~/.claude/settings.json` based on `claude-code-settings.json`
-
-2. **How it works**:
-   - Claude Code Stop hook triggers after each response
-   - Hook sends data via secure Unix socket at `~/.claude/telegram-relay.sock`
-   - Bot receives updates and sends to Telegram
-
-3. **What you'll see**:
-   - 💭 Thinking steps (Claude's internal reasoning)
-   - 🔧 Tool usage (file edits, commands, etc.)
-   - 🤖 Regular responses
-   - Full transparency into Claude's process
+- 🔧 Tool usage (file edits, commands, etc.)
+- 🤖 Regular responses with thinking steps
+- Asking for permission to use tools
 
 ## Troubleshooting
 
@@ -157,30 +147,20 @@ tmux send-keys -t claude-session "claude" Enter
 
 ## TODO
 
-### Hook Setup Automation
-
-- [x] **Hook Install/Uninstall**: Create `make install-hooks` and `make uninstall-hooks` commands
-  - Automatically backup existing `~/.claude/settings.json`
-  - Create `~/.claude/settings.json` if not exists
-  - Install hooks from `claude-code-settings.json` template with real paths to python scripts
-  - Restore original settings on uninstall
-  - Merge new hooks with existing hooks
-  - Hooks should be installed BEFORE starting the Claude
-
 ### Event Filtering
 
 - [ ] **tmux Session Filtering**: Only process hooks from the specific tmux session
   - Add session ID to hook payloads
   - Filter out hooks from other Claude instances
   - Prevent cross-session message contamination
-  - Support multiple bots with different tmux sessions
+  - Support multiple bots with different tmux sessions (independent setups)
 
 ### Enhanced Integration
 
 - [ ] **Smart Hook Detection**: Auto-detect if hooks are properly configured
   - Check `~/.claude/settings.json` on startup
   - Warn user if hooks are missing or misconfigured
-  - Provide guided setup instructions
+  - Provide setup instructions
 
 ### Tool Usage Transparency
 
@@ -196,7 +176,7 @@ tmux send-keys -t claude-session "claude" Enter
   - ✅ **MultiEdit**: `✏️ **Multi-editing:** /path/to/file (3 changes)`
   - ✅ **WebSearch**: `🌐 **Web Search:** search terms`
   - 🔧 **Unknown tools**: Generic display until verified
-- [ ] **Adding New Tools (Future)**: How to add support for new tools scientifically
+- [ ] **Adding New Tools (Future)**: How to add support for new tools
   1. **Trigger the tool** - Use Claude Code to execute the new tool
   2. **Check logs** - Look for `tool_input_full` in `telegram-claude-bot.log`
   3. **Extract structure** - Find the exact parameter names and types
@@ -208,17 +188,6 @@ tmux send-keys -t claude-session "claude" Enter
   ```bash
   grep -A 1 '"tool_name": "NewTool"' telegram-claude-bot.log | grep "tool_input_full"
   ```
-
-
-### Makefile Enhancements
-
-- [x] **Integrated Workflow**: Streamline the entire setup process
-  - ✅ `make setup-full`: Install hooks + dependencies + validate configuration
-  - ✅ `make status`: Check tmux session, hooks, and bot status
-  - ✅ `make logs`: Tail bot logs with filtering
-  - ✅ `make format`: Format all Python files
-  - ✅ `make lint`: Run linting checks
-  - ✅ `make format-check`: Check if files are properly formatted
 
 ## License
 
