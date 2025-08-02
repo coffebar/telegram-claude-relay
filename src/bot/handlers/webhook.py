@@ -199,10 +199,10 @@ class MessageTracker:
         """Remove oldest entries if dict exceeds max_size."""
         if len(target_dict) <= max_size:
             return
-            
+
         # Get items with timestamps, fallback to arbitrary order for dicts without timestamps
         items = list(target_dict.items())
-        
+
         # Try to sort by timestamp if available
         try:
             if items and isinstance(items[0][1], dict) and "timestamp" in items[0][1]:
@@ -212,7 +212,7 @@ class MessageTracker:
                 pass
         except (IndexError, KeyError, TypeError):
             pass
-        
+
         # Remove oldest entries to get back to max_size
         entries_to_remove = len(target_dict) - max_size
         for i in range(entries_to_remove):
@@ -258,10 +258,10 @@ class ConversationWebhookHandler:
         """Remove oldest entries if dict exceeds max_size."""
         if len(target_dict) <= max_size:
             return
-            
+
         # Get items with timestamps, fallback to arbitrary order for dicts without timestamps
         items = list(target_dict.items())
-        
+
         # Try to sort by timestamp if available
         try:
             if items and isinstance(items[0][1], dict) and "timestamp" in items[0][1]:
@@ -271,7 +271,7 @@ class ConversationWebhookHandler:
                 pass
         except (IndexError, KeyError, TypeError):
             pass
-        
+
         # Remove oldest entries to get back to max_size
         entries_to_remove = len(target_dict) - max_size
         for i in range(entries_to_remove):
@@ -500,7 +500,9 @@ class ConversationWebhookHandler:
                         "tool_name": tool_name,
                         "timestamp": __import__("time").time(),
                     }
-                    self.message_tracker._limit_dict_size(self.message_tracker.pending_tool_operations)
+                    self.message_tracker._limit_dict_size(
+                        self.message_tracker.pending_tool_operations
+                    )
 
                     logger.info(
                         "Pre-registered tool operation (immediate)",
@@ -818,7 +820,7 @@ class ConversationWebhookHandler:
         options = message.get("options", [])
         dialog_id = message.get("dialog_id", f"dialog_{session_id}")
 
-        if not question or not options or len(options) != 3:
+        if not question or not options:
             logger.warning(
                 "Invalid permission dialog",
                 question_length=len(question),
@@ -835,24 +837,43 @@ class ConversationWebhookHandler:
         }
         self._limit_dict_size(self.permission_dialogs)
 
-        # Create inline keyboard with the 3 options
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    f"✅ {options[0]}", callback_data=f"perm_{dialog_id}_1"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    f"🔄 {options[1]}", callback_data=f"perm_{dialog_id}_2"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    f"❌ {options[2]}", callback_data=f"perm_{dialog_id}_3"
-                )
-            ],
-        ]
+        # Handle parsing failure case - show message without buttons
+        if len(options) == 1 and "parsing failed" in options[0].lower():
+            formatted_message = f"{question}\n\n{options[0]}"
+
+            # Send to all subscribed users
+            users_to_notify = (
+                self.subscribed_users
+                if self.subscribed_users
+                else (self.settings.allowed_users or [])
+            )
+
+            for user_id in users_to_notify:
+                try:
+                    await self.bot.send_message(
+                        chat_id=user_id,
+                        text=formatted_message,
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                    logger.info(
+                        "Sent parsing failure message to user",
+                        user_id=user_id,
+                        dialog_id=dialog_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to send parsing failure message to user",
+                        user_id=user_id,
+                        error=str(e),
+                    )
+            return
+
+        # Create dynamic inline keyboard based on number of options
+        keyboard = []
+        for i, option in enumerate(options):
+            keyboard.append(
+                [InlineKeyboardButton(option, callback_data=f"perm_{dialog_id}_{i+1}")]
+            )
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         # Format the message - question already includes the header

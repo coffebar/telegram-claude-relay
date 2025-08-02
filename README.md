@@ -161,7 +161,9 @@ tmux send-keys -t claude-session "claude" Enter
 
 - [ ] Support multiple bots with different tmux sessions (independent setups)
 - [ ] Disable logging when not debugging
-- [ ] Remove header filename in diff output
+- [ ] Add markdown support for Plans
+- [ ] Cache target pane discovery to reduce permission dialog latency
+- [ ] /clear command to menu
 
 ### Tool Usage Transparency
 

@@ -231,4 +231,3 @@ class TmuxClient:
         raise TmuxResponseTimeoutError(
             f"No output change detected within {timeout} seconds"
         )
-

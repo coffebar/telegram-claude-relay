@@ -6,7 +6,7 @@ import os
 import time
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -152,7 +152,7 @@ class UnixSocketServer:
             target_cwd=self.target_cwd,
             data_keys=list(hook_data.keys()),
         )
-        
+
         # Extra detailed logging for Notification hooks to understand permission patterns
         if hook_type == "Notification":
             message = hook_data.get("message", "")
@@ -363,9 +363,15 @@ class UnixSocketServer:
                 "Processing Notification hook",
                 session_id=session_id,
                 full_message=message,  # Complete message for pattern analysis
-                message_type="permission_request" if "permission" in message.lower() else
-                            "idle_timeout" if "waiting for your input" in message.lower() else
-                            "unknown_notification",
+                message_type=(
+                    "permission_request"
+                    if "permission" in message.lower()
+                    else (
+                        "idle_timeout"
+                        if "waiting for your input" in message.lower()
+                        else "unknown_notification"
+                    )
+                ),
                 transcript_path=transcript_path,
                 has_recent_tool_usage=session_id in self.recent_tool_usage,
                 recent_tool_context=self.recent_tool_context.get(session_id, {}),
@@ -377,35 +383,48 @@ class UnixSocketServer:
                     "PERMISSION_DIALOG_DETECTED",  # Make it easy to grep for these
                     session_id=session_id,
                     full_permission_message=message,
-                    recent_tool_used=self.recent_tool_context.get(session_id, {}).get("tool_use", "unknown"),
+                    recent_tool_used=self.recent_tool_context.get(session_id, {}).get(
+                        "tool_use", "unknown"
+                    ),
                     tool_context_full=self.recent_tool_context.get(session_id, {}),
                     notification_hook_data=hook_data,  # Complete hook data
-                    detection_method="message_content" if "permission" in message.lower() else "recent_tool_timing",
+                    detection_method=(
+                        "message_content"
+                        if "permission" in message.lower()
+                        else "recent_tool_timing"
+                    ),
                 )
 
-                # Primary: Use recent PreToolUse hook data (most accurate for permission dialogs)
-                context = self._get_fallback_context(session_id)
+                # Use only PreToolUse hook data as source
+                recent_context = self.recent_tool_context.get(session_id, {})
 
-                if context:
+                if recent_context:
+                    # Build enhanced context with complete tool_input data
+                    context = {
+                        "tool_use": recent_context.get("tool_use"),
+                        "tool_input": recent_context.get("tool_input", {}),
+                        "timestamp": recent_context.get("timestamp"),
+                    }
+
                     logger.info(
-                        "Using PreToolUse hook context (primary source)",
+                        "Built permission context from hook data",
                         session_id=session_id,
-                        hook_context=context,
+                        tool_name=context.get("tool_use"),
+                        tool_input_keys=list(context.get("tool_input", {}).keys()),
                     )
                 else:
-                    # Secondary fallback: Try transcript parsing (for edge cases)
-                    logger.info(
-                        "No recent PreToolUse context, trying transcript parsing"
+                    logger.warning(
+                        "No PreToolUse hook context available for permission dialog",
+                        session_id=session_id,
                     )
-                    context = await self._get_permission_context_from_transcript(
-                        transcript_path
-                    )
-                    if context:
-                        logger.info(
-                            "Using transcript context (fallback)",
-                            session_id=session_id,
-                            transcript_context=context,
-                        )
+                    return {"continue": True}
+
+                # Read tmux pane to get actual permission options
+                tmux_content = await self._read_tmux_pane_content()
+                permission_options = self._parse_permission_options(tmux_content)
+
+                # Add options to context
+                context["permission_options"] = permission_options
 
                 logger.info(
                     "Permission context extracted",
@@ -474,7 +493,7 @@ class UnixSocketServer:
             logger.info(
                 "Not a permission dialog - Claude is waiting for input",
                 session_id=session_id,
-                message=message
+                message=message,
             )
             return False
 
@@ -483,7 +502,7 @@ class UnixSocketServer:
             logger.info(
                 "Permission dialog detected by message content",
                 session_id=session_id,
-                message=message
+                message=message,
             )
             return True
 
@@ -583,7 +602,9 @@ class UnixSocketServer:
             # For ExitPlanMode, extract the plan content
             plan_content = tool_input.get("plan", "")
             context_info["plan"] = plan_content
-            context_info["code_snippet"] = plan_content  # Also store in code_snippet for compatibility
+            context_info["code_snippet"] = (
+                plan_content  # Also store in code_snippet for compatibility
+            )
 
         logger.info(
             "PreToolUse hook context built successfully",
@@ -619,14 +640,164 @@ class UnixSocketServer:
             del self.recent_tool_context[session_id]
             logger.debug("Cleaned up old tool context entry", session_id=session_id)
 
+    async def _read_tmux_pane_content(self) -> str:
+        """Read current tmux pane content to extract permission options."""
+        try:
+            import subprocess
+
+            # Get the target pane (same logic as tmux integration)
+            if self.config.pane:
+                target_pane = self.config.pane
+            else:
+                # Auto-discover Claude pane
+                result = subprocess.run(
+                    [
+                        "tmux",
+                        "list-panes",
+                        "-a",
+                        "-F",
+                        "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+
+                if result.returncode != 0:
+                    return ""
+
+                # Find pane running claude (same logic as facade.py)
+                for line in result.stdout.strip().split("\n"):
+                    parts = line.split(" ", 1)
+                    if len(parts) == 2 and parts[1] == "claude":
+                        target_pane = parts[0]
+                        break
+                else:
+                    return ""
+
+            # Capture pane content (last 30 lines should be enough)
+            result = subprocess.run(
+                ["tmux", "capture-pane", "-t", target_pane, "-p", "-S", "-30"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+
+            if result.returncode == 0:
+                content = result.stdout
+                logger.info(
+                    "Captured tmux pane content",
+                    target_pane=target_pane,
+                    content_length=len(content),
+                    content_preview=content[-200:] if content else "",
+                )
+                return content
+            else:
+                logger.warning(
+                    "Failed to capture tmux pane content",
+                    returncode=result.returncode,
+                    stderr=result.stderr,
+                )
+                return ""
+
+        except Exception as e:
+            logger.error("Error reading tmux pane content", error=str(e))
+            return ""
+
+    def _parse_permission_options(self, tmux_content: str) -> List[str]:
+        """Parse numbered list of permission options from tmux pane content."""
+        if not tmux_content:
+            return []
+
+        lines = tmux_content.strip().split("\n")
+        options = []
+
+        # Look for the last numbered list in the content
+        # Pattern: lines starting with "❯ 1. " or "  2. " etc.
+        current_list = []
+        current_option_text = ""
+
+        import re
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Skip lines that don't contain digits (optimization)
+            if not any(c.isdigit() for c in stripped):
+                continue
+
+            # Check if line starts with optional "│" then optional "❯ " followed by number, dot and space
+            # Handles: "│ ❯ 1. Yes" and "│   2. Yes, and don't ask again..."
+            match = re.match(r"^│?\s*❯?\s*(\d+)\.\s+(.+)", stripped)
+
+            if match:
+                # If we were building a multi-line option, save it
+                if current_option_text and current_list:
+                    current_list[-1] = current_option_text.strip()
+
+                number = int(match.group(1))
+                text = match.group(2).strip()
+                # Remove trailing box drawing characters and other unwanted chars
+                text = re.sub(r"[│╰╯╭╮┌┐└┘├┤┬┴┼─━═║╔╗╚╝╠╣╦╩╬]*$", "", text).strip()
+
+                # If this is number 1, start a new list
+                if number == 1:
+                    current_list = [text]
+                    current_option_text = text
+                # If this continues the sequence, add to current list
+                elif number == len(current_list) + 1:
+                    current_list.append(text)
+                    current_option_text = text
+                # If sequence is broken, start over
+                else:
+                    current_list = [text] if number == 1 else []
+                    current_option_text = text if number == 1 else ""
+            else:
+                # Check if this line is a continuation of the previous option
+                # (e.g., wrapped text from a long option)
+                # Look for lines that start with "│   " (continuation) but not "│ ❯" or "│   N." (new options)
+                continuation_match = re.match(r"^│\s+([^❯\d].+)", stripped)
+                if current_list and current_option_text and continuation_match:
+                    continuation_text = continuation_match.group(1).strip()
+                    # Remove trailing box drawing characters
+                    continuation_text = re.sub(
+                        r"[│╰╯╭╮┌┐└┘├┤┬┴┼─━═║╔╗╚╝╠╣╦╩╬]*$", "", continuation_text
+                    ).strip()
+                    current_option_text += " " + continuation_text
+                else:
+                    # If we were building a multi-line option, save it
+                    if current_option_text and current_list:
+                        current_list[-1] = current_option_text.strip()
+                        current_option_text = ""
+
+        # Save any remaining multi-line option
+        if current_option_text and current_list:
+            current_list[-1] = current_option_text.strip()
+
+        # Use the last complete numbered list we found
+        if current_list:
+            options = current_list
+
+        logger.info(
+            "Parsed permission options from tmux",
+            options_count=len(options),
+            options=options,
+            tmux_content_preview=tmux_content[-500:] if tmux_content else "",
+            full_tmux_content=(
+                tmux_content[:1000] if tmux_content else ""
+            ),  # Show first 1000 chars for debugging
+        )
+
+        return options
+
     def _limit_dict_size(self, target_dict: Dict, max_size: int = 1000) -> None:
         """Remove oldest entries if dict exceeds max_size."""
         if len(target_dict) <= max_size:
             return
-            
+
         # Get items with timestamps, fallback to arbitrary order for dicts without timestamps
         items = list(target_dict.items())
-        
+
         # Try to sort by timestamp if available
         try:
             if items and isinstance(items[0][1], dict) and "timestamp" in items[0][1]:
@@ -640,7 +811,7 @@ class UnixSocketServer:
                 pass
         except (IndexError, KeyError, TypeError):
             pass
-        
+
         # Remove oldest entries to get back to max_size
         entries_to_remove = len(target_dict) - max_size
         for i in range(entries_to_remove):
@@ -828,7 +999,9 @@ class UnixSocketServer:
                                     context_info["tool_use"] = tool_name
                                     plan_content = tool_input.get("plan", "")
                                     context_info["plan"] = plan_content
-                                    context_info["code_snippet"] = plan_content  # Also store in code_snippet for compatibility
+                                    context_info["code_snippet"] = (
+                                        plan_content  # Also store in code_snippet for compatibility
+                                    )
                                     logger.info(
                                         "Context extraction successful (ExitPlanMode)",
                                         tool_name=tool_name,

@@ -49,8 +49,6 @@ class DirectoryTraversalError(SecurityError):
     pass
 
 
-
-
 class StorageError(ClaudeCodeTelegramError):
     """Storage-related errors."""
 

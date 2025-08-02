@@ -210,13 +210,12 @@ class RateLimiter:
         """Remove oldest entries if dictionaries exceed max_size."""
         if len(self.request_buckets) <= max_size:
             return
-            
+
         # Sort by last_update timestamp to remove oldest
         sorted_buckets = sorted(
-            self.request_buckets.items(), 
-            key=lambda x: x[1].last_update
+            self.request_buckets.items(), key=lambda x: x[1].last_update
         )
-        
+
         # Remove oldest entries to get back to max_size
         entries_to_remove = len(self.request_buckets) - max_size
         for i in range(entries_to_remove):

@@ -289,17 +289,11 @@ class ConversationMonitor:
             context = dialog_data.get("context", {})
             message = dialog_data.get("message", "")
 
-            # Build context-aware question (always simplified to avoid duplication)
-            question = self._build_permission_question(
-                message, context, simplified=True
-            )
+            # Build detailed permission question with complete context
+            question = self._build_permission_question(message, context)
 
-            # Use different options for ExitPlanMode vs regular permissions
-            tool_use = context.get("tool_use") if context else None
-            if tool_use == "ExitPlanMode":
-                options = ["Auto-accept edits", "Follow plan with manual confirmation", "Keep planning"]
-            else:
-                options = ["Allow", "Allow and don't ask again", "Deny"]
+            # Use parsed options from tmux pane or fallback
+            options = self._get_permission_options(context)
 
             payload = {
                 "session_id": dialog_data.get("session_id", "unknown"),
@@ -321,6 +315,28 @@ class ConversationMonitor:
         except Exception as e:
             logger.error("Error sending permission dialog", error=str(e))
 
+    def _get_permission_options(self, context: Dict[str, Any]) -> List[str]:
+        """Get permission options from parsed tmux content or fallback."""
+        if not context:
+            return ["Allow", "Allow and don't ask again", "Deny"]
+
+        # Use parsed options from tmux if available
+        parsed_options = context.get("permission_options", [])
+        if parsed_options:
+            logger.info(
+                "Using parsed permission options from tmux",
+                options_count=len(parsed_options),
+                options=parsed_options,
+            )
+            return parsed_options
+
+        # Fallback: show parsing failure message instead of buttons
+        logger.warning(
+            "No permission options parsed from tmux, using parsing failure fallback",
+            tool_use=context.get("tool_use"),
+        )
+        return ["Options parsing failed - please check tmux pane manually"]
+
     def _build_permission_question(
         self, message: str, context: Dict[str, Any], simplified: bool = False
     ) -> str:
@@ -331,9 +347,40 @@ class ConversationMonitor:
             return f"🔐 **Permission Required**\n\n{base_message}"
 
         tool_use = context.get("tool_use")
-        file_path = context.get("file_path", "")
-        code_snippet = context.get("code_snippet", "")
-        new_code = context.get("new_code", "")
+        tool_input = context.get("tool_input", {})
+
+        # Extract tool-specific fields from tool_input
+        file_path = tool_input.get("file_path", "")
+
+        # Extract old and new content based on tool type
+        if tool_use == "Edit":
+            code_snippet = tool_input.get("old_string", "")
+            new_code = tool_input.get("new_string", "")
+        elif tool_use == "MultiEdit":
+            edits = tool_input.get("edits", [])
+            if edits and isinstance(edits[0], dict):
+                code_snippet = edits[0].get("old_string", "")
+                new_code = edits[0].get("new_string", "")
+            else:
+                code_snippet = ""
+                new_code = ""
+        elif tool_use == "Write":
+            code_snippet = ""  # Write doesn't have old content
+            new_code = tool_input.get("content", "")
+        elif tool_use == "Bash":
+            code_snippet = tool_input.get("command", "")
+            new_code = ""  # Bash doesn't have new content
+        elif tool_use == "ExitPlanMode":
+            code_snippet = tool_input.get("plan", "")
+            new_code = ""  # Plan doesn't have new content
+        else:
+            # Generic fallback - try to find any content
+            code_snippet = (
+                tool_input.get("content", "")
+                or tool_input.get("command", "")
+                or tool_input.get("plan", "")
+            )
+            new_code = ""
 
         # Detect programming language from file extension
         lang = self._detect_language(file_path)
@@ -352,14 +399,24 @@ class ConversationMonitor:
                 question = f"🔐 **Permission Required**\n\n{base_message}"
                 if file_path:
                     question += f"\n\n📂 **File:** `{file_path}`"
-                if code_snippet:
-                    # Show full code snippet, no truncation
+                if code_snippet and new_code:
+                    # Create diff showing the changes
+                    diff_content = self._create_diff(code_snippet, new_code, file_path)
+                    # Escape backticks in diff to prevent breaking the code block
+                    diff_content_escaped = diff_content.replace("```", "\\`\\`\\`")
                     question += (
-                        f"\n\n**Code to replace:**\n```{lang}\n{code_snippet}\n```"
+                        f"\n\n**Changes:**\n```diff\n{diff_content_escaped}\n```"
                     )
-                if new_code:
-                    # Show full new code, no truncation
-                    question += f"\n\n**New code:**\n```{lang}\n{new_code}\n```"
+                elif code_snippet:
+                    # Show code being removed if no new code available
+                    code_snippet_escaped = code_snippet.replace("```", "\\`\\`\\`")
+                    question += (
+                        f"\n\n**Removing:**\n```{lang}\n{code_snippet_escaped}\n```"
+                    )
+                elif new_code:
+                    # Show code being added if no old code available
+                    new_code_escaped = new_code.replace("```", "\\`\\`\\`")
+                    question += f"\n\n**Adding:**\n```{lang}\n{new_code_escaped}\n```"
 
         elif tool_use == "Write":
             if simplified:
@@ -414,11 +471,13 @@ class ConversationMonitor:
 
         elif tool_use == "ExitPlanMode":
             # Special handling for ExitPlanMode - show the plan content
-            plan_content = context.get("plan", code_snippet)  # Plan might be in 'plan' field or 'code_snippet'
+            plan_content = context.get(
+                "plan", code_snippet
+            )  # Plan might be in 'plan' field or 'code_snippet'
             if plan_content:
                 question = f"📋 **Plan Ready**\n\n{plan_content}\n\n**How would you like to proceed?**"
             else:
-                question = f"📋 **Plan Ready**\n\nClaude has finished planning and is ready to proceed.\n\n**How would you like to proceed?**"
+                question = "📋 **Plan Ready**\n\nClaude has finished planning and is ready to proceed.\n\n**How would you like to proceed?**"
 
         else:
             # Generic tool or unknown
@@ -521,8 +580,6 @@ class ConversationMonitor:
         diff_lines = difflib.unified_diff(
             old_lines,
             new_lines,
-            fromfile=f"{file_path} (before)",
-            tofile=f"{file_path} (after)",
             n=3,  # Context lines
         )
 
@@ -533,8 +590,16 @@ class ConversationMonitor:
         if not diff_content:
             return "# No changes detected"
 
-        # Remove trailing newlines to avoid excessive spacing
-        return diff_content.rstrip()
+        # Remove header lines (--- and +++) and trailing newlines
+        lines = diff_content.splitlines()
+        # Filter out header lines that start with --- or +++
+        filtered_lines = [
+            line
+            for line in lines
+            if not (line.startswith("---") or line.startswith("+++"))
+        ]
+
+        return "\n".join(filtered_lines)
 
     def _format_hook_notification(self, notification: Dict[str, Any]) -> Optional[str]:
         """Format hook notification for display."""

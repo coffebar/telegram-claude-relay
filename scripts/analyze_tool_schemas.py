@@ -56,25 +56,28 @@ class ToolSchemaAnalyzer:
         self.log(f"Analyzing Claude JSONL files in: {claude_dir}")
 
         if not claude_dir.exists():
-            raise FileNotFoundError(
-                f"Claude directory not found: {claude_dir}")
+            raise FileNotFoundError(f"Claude directory not found: {claude_dir}")
 
         # Find JSONL files modified in the last N days
         cutoff_date = datetime.now() - timedelta(days=days_back)
         jsonl_files = []
 
-        for root, dirs, files in os.walk(claude_dir):
+        for root, _dirs, files in os.walk(claude_dir):
             for file in files:
-                if file.endswith('.jsonl'):
+                if file.endswith(".jsonl"):
                     file_path = Path(root) / file
                     try:
-                        if datetime.fromtimestamp(file_path.stat().st_mtime) >= cutoff_date:
+                        if (
+                            datetime.fromtimestamp(file_path.stat().st_mtime)
+                            >= cutoff_date
+                        ):
                             jsonl_files.append(file_path)
                     except (OSError, ValueError):
                         continue
 
         self.log(
-            f"Found {len(jsonl_files)} JSONL files modified in last {days_back} days")
+            f"Found {len(jsonl_files)} JSONL files modified in last {days_back} days"
+        )
 
         # Track tool use/result pairs
         tool_use_map = {}  # Map tool_use_id to tool_use data
@@ -82,28 +85,36 @@ class ToolSchemaAnalyzer:
         for jsonl_file in jsonl_files:
             self.log(f"Processing: {jsonl_file}")
             try:
-                self._process_jsonl_file(
-                    jsonl_file, target_tools, tool_use_map)
+                self._process_jsonl_file(jsonl_file, target_tools, tool_use_map)
             except Exception as e:
                 if self.verbose:
                     print(f"Warning: Error processing file {jsonl_file}: {e}")
 
     def _process_jsonl_file(
-        self, jsonl_file: Path, target_tools: Optional[Set[str]], tool_use_map: Dict[str, Any]
+        self,
+        jsonl_file: Path,
+        target_tools: Optional[Set[str]],
+        tool_use_map: Dict[str, Any],
     ):
         """Process a single JSONL file for tool data."""
         with open(jsonl_file, encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 try:
                     self._process_jsonl_line(
-                        line.strip(), line_num, target_tools, tool_use_map)
+                        line.strip(), line_num, target_tools, tool_use_map
+                    )
                 except Exception as e:
                     if self.verbose:
                         print(
-                            f"Warning: Error processing line {line_num} in {jsonl_file}: {e}")
+                            f"Warning: Error processing line {line_num} in {jsonl_file}: {e}"
+                        )
 
     def _process_jsonl_line(
-        self, line: str, line_num: int, target_tools: Optional[Set[str]], tool_use_map: Dict[str, Any]
+        self,
+        line: str,
+        line_num: int,
+        target_tools: Optional[Set[str]],
+        tool_use_map: Dict[str, Any],
     ):
         """Process a single JSONL line for tool data."""
         try:
@@ -143,11 +154,12 @@ class ToolSchemaAnalyzer:
                     tool_use_map[tool_use_id] = {
                         "name": tool_name,
                         "input": tool_input,
-                        "line_num": line_num
+                        "line_num": line_num,
                     }
 
                     self.log(
-                        f"Found tool_use {tool_name} with ID {tool_use_id} at line {line_num}")
+                        f"Found tool_use {tool_name} with ID {tool_use_id} at line {line_num}"
+                    )
 
                     # Analyze input parameters
                     self._analyze_parameters(tool_name, "input", tool_input)
@@ -161,24 +173,26 @@ class ToolSchemaAnalyzer:
                     tool_name = tool_use_data["name"]
 
                     self.log(
-                        f"Found tool_result for {tool_name} (ID: {tool_use_id}) at line {line_num}")
+                        f"Found tool_result for {tool_name} (ID: {tool_use_id}) at line {line_num}"
+                    )
 
                     # Analyze result from content field
                     result_content = item.get("content")
                     if result_content:
-                        self._analyze_parameters(tool_name, "response", {
-                                                 "content": result_content})
+                        self._analyze_parameters(
+                            tool_name, "response", {"content": result_content}
+                        )
 
                     # Also analyze toolUseResult if present (has more structured data)
                     tool_use_result = data.get("toolUseResult", {})
                     if tool_use_result:
-                        self._analyze_parameters(
-                            tool_name, "response", tool_use_result)
+                        self._analyze_parameters(tool_name, "response", tool_use_result)
 
                     # Update usage stats
                     self.tool_schemas[tool_name]["usage_count"] += 1
-                    self.tool_schemas[tool_name]["last_seen"] = datetime.now(
-                    ).isoformat()
+                    self.tool_schemas[tool_name][
+                        "last_seen"
+                    ] = datetime.now().isoformat()
 
                     # Remove from map to avoid reprocessing
                     del tool_use_map[tool_use_id]
@@ -221,8 +235,7 @@ class ToolSchemaAnalyzer:
             return "string"
         elif isinstance(value, list):
             if value:
-                element_types = {self._get_value_type(
-                    item) for item in value[:3]}
+                element_types = {self._get_value_type(item) for item in value[:3]}
                 if len(element_types) == 1:
                     return f"array<{element_types.pop()}>"
                 else:
@@ -337,8 +350,7 @@ class ToolSchemaAnalyzer:
                             existing_params[param] = param_info
             else:
                 # New tool
-                existing_schema.setdefault("tools", {})[
-                    tool_name] = new_tool_data
+                existing_schema.setdefault("tools", {})[tool_name] = new_tool_data
 
         # Update metadata
         existing_schema["metadata"] = new_schema["metadata"]
@@ -368,8 +380,7 @@ def main():
     parser.add_argument(
         "--update", action="store_true", help="Update existing schema file"
     )
-    parser.add_argument("--verbose", action="store_true",
-                        help="Enable verbose output")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument(
         "--tool", action="append", dest="tools", help="Analyze only specific tools"
     )

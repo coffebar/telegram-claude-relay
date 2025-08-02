@@ -120,8 +120,6 @@ class ClaudeTmuxIntegration:
         if stream_callback:
             await stream_callback(StreamUpdate(type="user", content=prompt))
 
-
-
     async def validate_setup(self) -> bool:
         """Validate tmux pane configuration.
 
