@@ -10,7 +10,8 @@ from pathlib import Path
 
 def main():
     """Process Notification hook event via Unix socket."""
-    socket_path = Path.home() / ".claude" / "telegram-relay.sock"
+    # Socket is in the project root directory (parent of hooks directory)
+    socket_path = Path(__file__).parent.parent / "telegram-relay.sock"
 
     try:
         # Read hook input from stdin

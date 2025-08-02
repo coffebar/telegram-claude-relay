@@ -160,7 +160,6 @@ tmux send-keys -t claude-session "claude" Enter
 
 ### Core Improvements
 
-- [ ] Support multiple bots with different tmux sessions (independent setups)
 - [ ] Disable logging when not debugging
 - [ ] Cache target pane discovery to reduce permission dialog latency
 - [ ] /clear command to menu

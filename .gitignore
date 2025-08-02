@@ -141,3 +141,4 @@ data/
 
 # Bot-specific
 tool_schemas.json
+telegram-relay.sock
