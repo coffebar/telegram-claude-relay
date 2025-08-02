@@ -6,8 +6,10 @@ import structlog
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+import telegramify_markdown
 
 from ...config.settings import Settings
+from ..utils.message_sender import RobustMessageSender
 
 
 logger = structlog.get_logger()
@@ -253,6 +255,9 @@ class ConversationWebhookHandler:
         self.permission_dialogs: Dict[str, Dict[str, Any]] = (
             {}
         )  # dialog_id -> dialog info
+        self.message_sender = RobustMessageSender(
+            bot
+        )  # Robust message sender with fallback
 
     def _limit_dict_size(self, target_dict: Dict, max_size: int = 1000) -> None:
         """Remove oldest entries if dict exceeds max_size."""
@@ -343,13 +348,9 @@ class ConversationWebhookHandler:
             return None
 
         # Format based on message type
-        if msg_type == "thinking":
-            # Show thinking steps in italic
-            return f"💭 _Thinking: {content}_"
-
-        elif msg_type == "message" and role == "assistant":
-            # Regular Claude response - will be handled by message splitting in _send_new_message
-            return f"🤖 **Claude:**\n{content}"
+        if msg_type == "message" and role == "assistant":
+            # Regular Claude response - use as-is since Claude outputs clean markdown
+            return f"🤖 *Claude:*\n{content}"
 
         elif msg_type == "message" and role == "user":
             # Echo user messages (optional)
@@ -378,15 +379,29 @@ class ConversationWebhookHandler:
                             )
                             return None  # Skip this notification
 
-            # Real-time hook notifications
-            return content  # Already formatted by ConversationMonitor
+            # Real-time hook notifications - convert markdown from ConversationMonitor
+            try:
+                converted_content = telegramify_markdown.markdownify(content)
+                return converted_content
+            except Exception as e:
+                logger.warning(
+                    "Failed to convert hook_notification content", error=str(e)
+                )
+                return content
 
         # Tool calls
         tool_calls = message.get("tool_calls", [])
         if tool_calls:
             tools_text = self._format_tool_calls(tool_calls)
             if tools_text:
-                return f"🔧 **Tools Used:**\n{tools_text}"
+                # Convert the entire tool calls message including the header
+                try:
+                    full_message = f"🔧 **Tools Used:**\n{tools_text}"
+                    converted_content = telegramify_markdown.markdownify(full_message)
+                    return converted_content
+                except Exception as e:
+                    logger.warning("Failed to convert tool_calls content", error=str(e))
+                    return f"🔧 **Tools Used:**\n{tools_text}"
 
         return None
 
@@ -613,11 +628,11 @@ class ConversationWebhookHandler:
                                     combined_message
                                 )
 
-                                await self.bot.edit_message_text(
+                                await self.message_sender.edit_message_text(
                                     chat_id=matching_operation["chat_id"],
                                     message_id=matching_operation["message_id"],
                                     text=sanitized_message,
-                                    parse_mode=ParseMode.MARKDOWN,
+                                    parse_mode=ParseMode.MARKDOWN_V2,
                                 )
 
                                 logger.info(
@@ -743,7 +758,7 @@ class ConversationWebhookHandler:
         return parts
 
     async def _send_message_series(
-        self, user_id: int, message: str, parse_mode=ParseMode.MARKDOWN
+        self, user_id: int, message: str, parse_mode=ParseMode.MARKDOWN_V2
     ) -> dict:
         """Send a message as a series if it's too long, return info about the last message."""
         # Sanitize message for Telegram Markdown parsing
@@ -755,7 +770,7 @@ class ConversationWebhookHandler:
         sent_messages = []
         for i, part in enumerate(message_parts):
             try:
-                sent_msg = await self.bot.send_message(
+                sent_msg = await self.message_sender.send_message(
                     chat_id=user_id, text=part, parse_mode=parse_mode
                 )
                 sent_messages.append(
@@ -839,7 +854,16 @@ class ConversationWebhookHandler:
 
         # Handle parsing failure case - show message without buttons
         if len(options) == 1 and "parsing failed" in options[0].lower():
-            formatted_message = f"{question}\n\n{options[0]}"
+            raw_message = f"{question}\n\n{options[0]}"
+            # Convert markdown in permission dialogs
+            try:
+                formatted_message = telegramify_markdown.markdownify(raw_message)
+            except Exception as e:
+                logger.warning(
+                    "Failed to convert permission dialog (parsing failure)",
+                    error=str(e),
+                )
+                formatted_message = raw_message
 
             # Send to all subscribed users
             users_to_notify = (
@@ -850,10 +874,10 @@ class ConversationWebhookHandler:
 
             for user_id in users_to_notify:
                 try:
-                    await self.bot.send_message(
+                    await self.message_sender.send_message(
                         chat_id=user_id,
                         text=formatted_message,
-                        parse_mode=ParseMode.MARKDOWN,
+                        parse_mode=ParseMode.MARKDOWN_V2,
                     )
                     logger.info(
                         "Sent parsing failure message to user",
@@ -877,7 +901,13 @@ class ConversationWebhookHandler:
         reply_markup = InlineKeyboardMarkup(keyboard)
 
         # Format the message - question already includes the header
-        formatted_message = f"{question}\n\nPlease select an option:"
+        raw_message = f"{question}\n\nPlease select an option:"
+        # Convert markdown in permission dialogs
+        try:
+            formatted_message = telegramify_markdown.markdownify(raw_message)
+        except Exception as e:
+            logger.warning("Failed to convert permission dialog (normal)", error=str(e))
+            formatted_message = raw_message
 
         # Send to all subscribed users
         users_to_notify = (
@@ -888,10 +918,10 @@ class ConversationWebhookHandler:
 
         for user_id in users_to_notify:
             try:
-                await self.bot.send_message(
+                await self.message_sender.send_message(
                     chat_id=user_id,
                     text=formatted_message,
-                    parse_mode=ParseMode.MARKDOWN,
+                    parse_mode=ParseMode.MARKDOWN_V2,
                     reply_markup=reply_markup,
                 )
                 logger.info(
@@ -946,14 +976,24 @@ class ConversationWebhookHandler:
 
             # Update the message to show the selected option
             option_text = dialog_info["options"][int(option_number) - 1]
-            updated_message = (
+            raw_updated_message = (
                 f"{dialog_info['question']}\n\n"
                 f"✅ **Selected:** {option_number}. {option_text}"
             )
+            # Convert markdown in callback response
+            try:
+                updated_message = telegramify_markdown.markdownify(raw_updated_message)
+            except Exception as e:
+                logger.warning(
+                    "Failed to convert permission callback response", error=str(e)
+                )
+                updated_message = raw_updated_message
 
-            await callback_query.edit_message_text(
+            await self.message_sender.edit_message_text(
+                chat_id=callback_query.message.chat_id,
+                message_id=callback_query.message.message_id,
                 text=updated_message,
-                parse_mode=ParseMode.MARKDOWN,
+                parse_mode=ParseMode.MARKDOWN_V2,
             )
 
             await callback_query.answer(f"Selected option {option_number}")
@@ -1065,10 +1105,10 @@ class ConversationWebhookHandler:
         success_count = 0
         for user_id in self.subscribed_users:
             try:
-                await self.bot.send_message(
+                await self.message_sender.send_message(
                     chat_id=user_id,
                     text=notification_message,
-                    parse_mode=ParseMode.MARKDOWN,
+                    parse_mode=ParseMode.MARKDOWN_V2,
                 )
                 success_count += 1
                 logger.info("Notified user about hook subscription", user_id=user_id)

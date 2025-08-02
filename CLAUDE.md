@@ -8,18 +8,27 @@ A Telegram bot that provides remote access to Claude Code CLI with advanced hook
 
 ```
 src/
+├── __init__.py
+├── main.py                    # Application entry point
+├── exceptions.py              # Global exception definitions
 ├── bot/
-│   ├── core.py                  # Main bot orchestrator
+│   ├── __init__.py
+│   ├── core.py                # Main bot orchestrator
 │   ├── handlers/
-│   │   ├── command.py          # /start command only
-│   │   ├── message.py          # Text message handling only
-│   │   └── webhook.py          # Hook monitoring webhook handler
-│   ├── middleware/             # Auth, rate limiting, security validation
-│   │   ├── auth.py
-│   │   ├── rate_limit.py
-│   │   └── security.py
-│   └── utils/formatting.py    # Response formatting
+│   │   ├── __init__.py
+│   │   ├── command.py         # /start command only
+│   │   ├── message.py         # Text message handling only
+│   │   └── webhook.py         # Hook monitoring webhook handler
+│   ├── middleware/
+│   │   ├── __init__.py
+│   │   ├── auth.py            # Authentication middleware
+│   │   └── rate_limit.py      # Rate limiting middleware
+│   └── utils/                 # Bot utilities
+│       ├── __init__.py
+│       ├── formatting.py      # Response formatting
+│       └── message_sender.py  # Robust message sender with fallback
 ├── claude/
+│   ├── __init__.py
 │   ├── facade.py              # Main Claude integration facade
 │   ├── tmux_integration.py    # tmux mode implementation
 │   ├── responses.py           # ClaudeResponse, StreamUpdate data structures
@@ -27,15 +36,20 @@ src/
 │   ├── unix_socket_server.py  # Unix socket server for hooks
 │   └── exceptions.py          # Claude-specific errors
 ├── tmux/
+│   ├── __init__.py
 │   ├── client.py              # TmuxClient for pane communication
 │   └── exceptions.py          # TmuxCommandError, TmuxPaneNotFoundError
 ├── config/
+│   ├── __init__.py
 │   ├── settings.py            # Pydantic settings (full config with many options)
 │   └── loader.py              # Configuration loading
 ├── security/
+│   ├── __init__.py
 │   ├── auth.py                # WhitelistAuthProvider, AuthenticationManager
 │   └── rate_limiter.py        # RateLimiter implementation
-└── utils/constants.py         # Application constants
+└── utils/
+    ├── __init__.py
+    └── constants.py           # Application constants
 ```
 
 ### ✅ Features Actually Implemented
@@ -47,6 +61,9 @@ src/
 5. ✅ **Security Middleware**: Authentication, rate limiting, security validation (all in-memory)
 6. ✅ **Error Handling**: tmux error handling and user-friendly error messages
 7. ✅ **Progress Indicators**: Shows typing indicators and progress messages during processing
+8. ✅ **Hook Integration**: Real-time tool notifications and permission dialogs via Unix socket
+9. ✅ **Professional Markdown Handling**: Uses telegramify-markdown with three-tier fallback system
+10. ✅ **Robust Message Delivery**: Guarantees 100% message delivery (MarkdownV2 → HTML → Plain text)
 
 ### ✅ Configuration (Full Settings Available)
 

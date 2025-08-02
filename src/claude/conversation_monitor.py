@@ -402,21 +402,13 @@ class ConversationMonitor:
                 if code_snippet and new_code:
                     # Create diff showing the changes
                     diff_content = self._create_diff(code_snippet, new_code, file_path)
-                    # Escape backticks in diff to prevent breaking the code block
-                    diff_content_escaped = diff_content.replace("```", "\\`\\`\\`")
-                    question += (
-                        f"\n\n**Changes:**\n```diff\n{diff_content_escaped}\n```"
-                    )
+                    question += f"\n\n**Changes:**\n```diff\n{diff_content}\n```"
                 elif code_snippet:
                     # Show code being removed if no new code available
-                    code_snippet_escaped = code_snippet.replace("```", "\\`\\`\\`")
-                    question += (
-                        f"\n\n**Removing:**\n```{lang}\n{code_snippet_escaped}\n```"
-                    )
+                    question += f"\n\n**Removing:**\n```{lang}\n{code_snippet}\n```"
                 elif new_code:
                     # Show code being added if no old code available
-                    new_code_escaped = new_code.replace("```", "\\`\\`\\`")
-                    question += f"\n\n**Adding:**\n```{lang}\n{new_code_escaped}\n```"
+                    question += f"\n\n**Adding:**\n```{lang}\n{new_code}\n```"
 
         elif tool_use == "Write":
             if simplified:
@@ -623,9 +615,7 @@ class ConversationMonitor:
                 message = "💻 **Bash**"
                 if description:
                     message += f" - {description}"
-                # Escape backticks in command to prevent breaking the code block
-                command_escaped = command.replace("```", "\\`\\`\\`")
-                message += f"\n```bash\n{command_escaped}\n```"
+                message += f"\n```bash\n{command}\n```"
                 return message
 
             elif tool_name == "LS":
@@ -648,23 +638,15 @@ class ConversationMonitor:
                 # If both old and new strings exist, create a diff
                 if old_string and new_string:
                     diff_content = self._create_diff(old_string, new_string, file_path)
-                    # Escape backticks in diff to prevent breaking the code block
-                    diff_content_escaped = diff_content.replace("```", "\\`\\`\\`")
-                    message += f"\n**Changes:**\n```diff\n{diff_content_escaped}\n```"
+                    message += f"\n**Changes:**\n```diff\n{diff_content}\n```"
                 else:
                     # Show full old code
                     if old_string:
-                        old_string_escaped = old_string.replace("```", "\\`\\`\\`")
-                        message += (
-                            f"\n**Removing:**\n```{lang}\n{old_string_escaped}\n```\n"
-                        )
+                        message += f"\n**Removing:**\n```{lang}\n{old_string}\n```\n"
 
                     # Show full new code
                     if new_string:
-                        new_string_escaped = new_string.replace("```", "\\`\\`\\`")
-                        message += (
-                            f"\n**Adding:**\n```{lang}\n{new_string_escaped}\n```"
-                        )
+                        message += f"\n**Adding:**\n```{lang}\n{new_string}\n```"
 
                 return message
 
@@ -726,9 +708,7 @@ class ConversationMonitor:
                 # Format the message with full content
                 message = f"✍️ **Writing:** `{file_path}`\n"
                 if content:
-                    # Escape backticks in content to prevent breaking the code block
-                    content_escaped = content.replace("```", "\\`\\`\\`")
-                    message += f"\n**Content:**\n```{lang}\n{content_escaped}\n```"
+                    message += f"\n**Content:**\n```{lang}\n{content}\n```"
 
                 return message
 
@@ -742,9 +722,7 @@ class ConversationMonitor:
                 message = f"🔍 **Searching in:** `{path}`"
                 if output_mode != "files_with_matches":
                     message += f" ({output_mode})"
-                # Escape backticks in pattern to prevent breaking the code block
-                pattern_escaped = pattern.replace("```", "\\`\\`\\`")
-                message += f"\n```regex\n{pattern_escaped}\n```"
+                message += f"\n```regex\n{pattern}\n```"
                 return message
 
             elif tool_name == "Glob":
@@ -775,20 +753,12 @@ class ConversationMonitor:
                         diff_content = self._create_diff(
                             old_string, new_string, file_path
                         )
-                        # Escape backticks in diff to prevent breaking the code block
-                        diff_content_escaped = diff_content.replace("```", "\\`\\`\\`")
-                        message += f"\n```diff\n{diff_content_escaped}\n```"
+                        message += f"\n```diff\n{diff_content}\n```"
                     else:
                         if old_string:
-                            old_string_escaped = old_string.replace("```", "\\`\\`\\`")
-                            message += (
-                                f"\n**Removing:**\n```{lang}\n{old_string_escaped}\n```"
-                            )
+                            message += f"\n**Removing:**\n```{lang}\n{old_string}\n```"
                         if new_string:
-                            new_string_escaped = new_string.replace("```", "\\`\\`\\`")
-                            message += (
-                                f"\n**Adding:**\n```{lang}\n{new_string_escaped}\n```"
-                            )
+                            message += f"\n**Adding:**\n```{lang}\n{new_string}\n```"
 
                     if i < len(edits):
                         message += "\n"

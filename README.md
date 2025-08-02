@@ -81,6 +81,7 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 - **System Monitoring**: Built-in status checks and log streaming
 - **Diff Formatting**: Code edits displayed in unified diff format for easy review
 - **CWD-based Hook Filtering**: Only processes hooks from Claude instance in the tmux session
+- **Smart Format Conversion**: Automatically converts Claude's standard markdown to Telegram-compatible format by using `telegramify-markdown`
 
 ## Configuration
 
@@ -161,7 +162,6 @@ tmux send-keys -t claude-session "claude" Enter
 
 - [ ] Support multiple bots with different tmux sessions (independent setups)
 - [ ] Disable logging when not debugging
-- [ ] Add markdown support for Plans
 - [ ] Cache target pane discovery to reduce permission dialog latency
 - [ ] /clear command to menu
 
