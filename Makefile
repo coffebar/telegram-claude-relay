@@ -1,4 +1,4 @@
-.PHONY: setup run clean help format lint format-check install-hooks uninstall-hooks setup-full status logs
+.PHONY: setup run clean help format lint format-check install-hooks uninstall-hooks setup-full status logs update-tool-schemas
 
 # Default target
 help:
@@ -18,6 +18,7 @@ help:
 	@echo "  make logs          - Tail bot logs with live updates"
 	@echo "  make install-hooks - Install Claude Code hooks"
 	@echo "  make uninstall-hooks - Uninstall Claude Code hooks"
+	@echo "  make update-tool-schemas - Update tool schemas documentation from logs"
 	@echo ""
 	@echo "Other:"
 	@echo "  make setup         - Create virtual environment and install dependencies"
@@ -38,20 +39,20 @@ clean:
 
 format:
 	@echo "Formatting Python files..."
-	@./venv/bin/isort src/ hooks/
-	@./venv/bin/black src/ hooks/
+	@./venv/bin/isort src/ hooks/ scripts/
+	@./venv/bin/black src/ hooks/ scripts/
 	@echo "✅ Code formatted"
 
 lint:
 	@echo "Running linting checks..."
-	@./venv/bin/ruff check src/ hooks/
+	@./venv/bin/ruff check src/ hooks/ scripts/
 	@echo "✅ Linting complete"
 
 format-check:
 	@echo "Checking code formatting..."
-	@./venv/bin/black --check src/ hooks/
-	@./venv/bin/isort --check-only src/ hooks/
-	@./venv/bin/ruff check src/ hooks/
+	@./venv/bin/black --check src/ hooks/ scripts/
+	@./venv/bin/isort --check-only src/ hooks/ scripts/
+	@./venv/bin/ruff check src/ hooks/ scripts/
 	@echo "✅ Format check complete"
 
 install-hooks:
@@ -135,3 +136,13 @@ logs:
 	@echo "Filters: INFO and above, excluding DEBUG"
 	@echo "=========================================="
 	@tail -f telegram-claude-bot.log 2>/dev/null | grep -v "DEBUG" || echo "❌ Log file not found. Bot may not have been started yet."
+
+# Update tool schemas documentation from logs
+update-tool-schemas:
+	@echo "📊 Updating tool schemas documentation..."
+	@if [ -f "telegram-claude-bot.log" ]; then \
+		./venv/bin/python scripts/analyze_tool_schemas.py --update --output tool_schemas.json; \
+		echo "✅ Tool schemas updated: tool_schemas.json"; \
+	else \
+		echo "❌ Log file not found. Start the bot to generate logs first."; \
+	fi

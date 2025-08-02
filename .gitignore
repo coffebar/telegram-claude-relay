@@ -117,9 +117,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
-
 # mypy
 .mypy_cache/
 .dmypy.json
@@ -143,6 +140,4 @@ data/
 *~
 
 # Bot-specific
-sessions/
-backups/
-uploads/
+tool_schemas.json
