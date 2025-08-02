@@ -99,6 +99,12 @@ make clean       # Remove venv
 make format      # Format all Python files with black and isort
 make lint        # Run linting checks with ruff
 make format-check# Check if files are properly formatted
+make setup-full  # Complete setup (dependencies + Claude hooks)
+make status      # Check tmux session, hooks, and bot status
+make logs        # Tail bot logs with live updates
+make install-hooks # Install Claude Code hooks
+make uninstall-hooks # Uninstall Claude Code hooks
+make update-tool-schemas # Update tool schemas documentation from logs
 make help        # Show available commands
 ```
 
