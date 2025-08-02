@@ -6,7 +6,6 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlparse
 
 import structlog
 
@@ -773,8 +772,7 @@ class ConversationMonitor:
                 if isinstance(tool_response, dict):
                     mode = tool_response.get("mode", "")
                     num_lines = tool_response.get("numLines", 0)
-                    num_files = tool_response.get("numFiles", 0)
-                    
+
                     if mode == "files_with_matches":
                         filenames = tool_response.get("filenames", [])
                         if filenames:

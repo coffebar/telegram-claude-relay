@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
@@ -40,8 +41,7 @@ class HookManager:
             return None
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = self.settings_path.with_suffix(
-            f".json.backup.{timestamp}")
+        backup_path = self.settings_path.with_suffix(f".json.backup.{timestamp}")
 
         shutil.copy2(self.settings_path, backup_path)
         print(f"✅ Created backup: {backup_path}")
@@ -50,11 +50,12 @@ class HookManager:
     def _load_settings(self) -> Dict[str, Any]:
         """Load existing settings or create new structure."""
         if self.settings_path.exists():
-            with open(self.settings_path, 'r') as f:
+            with open(self.settings_path) as f:
                 return json.load(f)
         else:
             print(
-                f"No existing settings found. Creating new settings at {self.settings_path}")
+                f"No existing settings found. Creating new settings at {self.settings_path}"
+            )
             return {}
 
     def _save_settings(self, settings: Dict[str, Any]) -> None:
@@ -62,7 +63,7 @@ class HookManager:
         # Ensure .claude directory exists
         self.claude_dir.mkdir(exist_ok=True)
 
-        with open(self.settings_path, 'w') as f:
+        with open(self.settings_path, "w") as f:
             json.dump(settings, f, indent=2)
         print(f"✅ Saved settings to {self.settings_path}")
 
@@ -72,7 +73,7 @@ class HookManager:
             print(f"❌ Template not found: {self.template_path}")
             sys.exit(1)
 
-        with open(self.template_path, 'r') as f:
+        with open(self.template_path) as f:
             template = json.load(f)
 
         return template.get("hooks", {})
@@ -88,14 +89,7 @@ class HookManager:
         # Convert to ~/ format
         hook_path_str = self._convert_to_tilde_path(str(hook_path))
 
-        return {
-            "hooks": [
-                {
-                    "type": "command",
-                    "command": hook_path_str
-                }
-            ]
-        }
+        return {"hooks": [{"type": "command", "command": hook_path_str}]}
 
     def install(self) -> None:
         """Install hooks into Claude settings."""
@@ -136,8 +130,7 @@ class HookManager:
                     # Check if this exact hook is already present
                     hook_command = new_hook_entry["hooks"][0]["command"]
                     already_exists = any(
-                        hook_entry.get("hooks", [{}])[0].get(
-                            "command") == hook_command
+                        hook_entry.get("hooks", [{}])[0].get("command") == hook_command
                         for hook_entry in settings["hooks"][hook_type]
                     )
 
@@ -147,7 +140,8 @@ class HookManager:
                         print(f"  ✅ Added {hook_type} hook: {hook_command}")
                     else:
                         print(
-                            f"  ⏭️  Skipped {hook_type} hook (already exists): {hook_filename}")
+                            f"  ⏭️  Skipped {hook_type} hook (already exists): {hook_filename}"
+                        )
 
         # Save updated settings
         self._save_settings(settings)
@@ -186,14 +180,13 @@ class HookManager:
             our_hooks = set()
             template_hooks = self._load_template_hooks()
 
-            for hook_type, hook_configs in template_hooks.items():
+            for _hook_type, hook_configs in template_hooks.items():
                 for config in hook_configs:
                     for hook in config.get("hooks", []):
                         command = hook.get("command", "")
                         hook_filename = os.path.basename(command)
                         hook_path = self.hooks_dir / hook_filename
-                        tilde_path = self._convert_to_tilde_path(
-                            str(hook_path))
+                        tilde_path = self._convert_to_tilde_path(str(hook_path))
                         our_hooks.add(tilde_path)
 
             # Remove our hooks from each hook type
@@ -201,7 +194,8 @@ class HookManager:
             for hook_type, hook_list in settings["hooks"].items():
                 original_count = len(hook_list)
                 settings["hooks"][hook_type] = [
-                    entry for entry in hook_list
+                    entry
+                    for entry in hook_list
                     if not any(
                         hook.get("command") in our_hooks
                         for hook in entry.get("hooks", [])
@@ -213,9 +207,7 @@ class HookManager:
                     print(f"  ✅ Removed {removed} {hook_type} hook(s)")
 
             # Clean up empty hook types
-            settings["hooks"] = {
-                k: v for k, v in settings["hooks"].items() if v
-            }
+            settings["hooks"] = {k: v for k, v in settings["hooks"].items() if v}
 
             # Save updated settings
             self._save_settings(settings)
