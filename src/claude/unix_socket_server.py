@@ -31,6 +31,23 @@ class UnixSocketServer:
         self.recent_tool_context: Dict[str, Dict[str, Any]] = (
             {}
         )  # session_id -> tool_context
+        self.tmux_client = None  # Will be set by the facade
+        self.target_cwd = None  # CWD of the Claude process we're monitoring
+
+    def set_tmux_client(self, tmux_client):
+        """Set the tmux client reference for CWD checking."""
+        self.tmux_client = tmux_client
+
+    async def initialize_target_cwd(self):
+        """Get and store the CWD of the Claude process we're monitoring."""
+        if self.tmux_client:
+            try:
+                from ..tmux.client import TmuxClient
+                self.target_cwd = await self.tmux_client.get_pane_cwd()
+                logger.info(f"Initialized target CWD: {self.target_cwd}")
+            except Exception as e:
+                logger.warning(f"Could not get tmux pane CWD: {e}")
+                self.target_cwd = None
 
     async def start(self):
         """Start the Unix socket server."""
@@ -40,6 +57,9 @@ class UnixSocketServer:
         # Remove existing socket file if it exists
         if self.socket_path.exists():
             self.socket_path.unlink()
+
+        # Get the target CWD before starting
+        await self.initialize_target_cwd()
 
         # Create Unix socket server
         self.server = await asyncio.start_unix_server(
@@ -88,21 +108,66 @@ class UnixSocketServer:
             writer.close()
             await writer.wait_closed()
 
+    def _truncate_params(self, params: Dict[str, Any], max_length: int = 200) -> Dict[str, Any]:
+        """Truncate parameter values for logging."""
+        truncated = {}
+        for key, value in params.items():
+            if isinstance(value, str):
+                truncated[key] = value[:max_length] + "..." if len(value) > max_length else value
+            elif isinstance(value, dict):
+                truncated[key] = self._truncate_params(value, max_length)
+            elif isinstance(value, list):
+                # For lists, truncate each item
+                truncated[key] = [
+                    (str(item)[:max_length] + "..." if len(str(item)) > max_length else item)
+                    if not isinstance(item, dict) else self._truncate_params(item, max_length)
+                    for item in value[:5]  # Only show first 5 items
+                ]
+                if len(value) > 5:
+                    truncated[key].append(f"... and {len(value) - 5} more items")
+            else:
+                truncated[key] = value
+        return truncated
+
     async def process_hook_event(self, hook_data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming hook event."""
         hook_type = hook_data.get("hook_event_name")
+        hook_cwd = hook_data.get("cwd") or hook_data.get("current_working_directory")
+        
         logger.info(
-            "Received hook event", hook_type=hook_type, data_keys=list(hook_data.keys())
+            "Received hook event", 
+            hook_type=hook_type, 
+            hook_cwd=hook_cwd,
+            target_cwd=self.target_cwd,
+            data_keys=list(hook_data.keys())
         )
+
+        # Check if we should process this hook based on CWD (if filtering is enabled)
+        if self.config.filter_hooks_by_cwd and self.target_cwd and hook_cwd:
+            # Normalize paths for comparison
+            hook_cwd_normalized = os.path.normpath(os.path.expanduser(hook_cwd))
+            target_cwd_normalized = os.path.normpath(os.path.expanduser(self.target_cwd))
+            
+            if hook_cwd_normalized != target_cwd_normalized:
+                logger.info(
+                    f"Ignoring hook from different CWD",
+                    hook_type=hook_type,
+                    hook_cwd=hook_cwd_normalized,
+                    target_cwd=target_cwd_normalized
+                )
+                # Return continue=True so Claude continues working
+                return {"status": "ok", "continue": True}
 
         if hook_type == "Stop":
             session_id = hook_data.get("session_id")
             transcript_path = hook_data.get("transcript_path")
 
+            # Log all hook data with truncated values
             logger.info(
                 "Processing Stop hook",
                 session_id=session_id,
                 transcript_path=transcript_path,
+                all_params=self._truncate_params(hook_data),
             )
 
             if not session_id or not transcript_path:
@@ -125,10 +190,13 @@ class UnixSocketServer:
             prompt = hook_data.get("prompt", "")
             session_id = hook_data.get("session_id", "unknown")
 
+            # Log all hook data with truncated values
             logger.info(
                 "Processing UserPromptSubmit hook",
                 session_id=session_id,
                 prompt_length=len(prompt),
+                prompt_preview=prompt[:200] + "..." if len(prompt) > 200 else prompt,
+                all_params=self._truncate_params(hook_data),
             )
 
             # Send notification about new prompt
@@ -168,6 +236,9 @@ class UnixSocketServer:
                     context_keys=list(self.recent_tool_context[session_id].keys()),
                 )
 
+            # Log all hook data with truncated values - this is the most important one for debugging
+            truncated_tool_input = self._truncate_params(tool_input) if isinstance(tool_input, dict) else str(tool_input)[:200]
+            
             logger.info(
                 "Processing PreToolUse hook",
                 session_id=session_id,
@@ -177,8 +248,9 @@ class UnixSocketServer:
                     if isinstance(tool_input, dict)
                     else "non-dict"
                 ),
-                tool_input_full=tool_input,
-            )  # Log the complete structure for analysis
+                tool_input_truncated=truncated_tool_input,
+                all_params=self._truncate_params(hook_data),
+            )
 
             # Send notification about tool use
             asyncio.create_task(
@@ -202,6 +274,10 @@ class UnixSocketServer:
             tool_input = hook_data.get("tool_input", {})
             session_id = hook_data.get("session_id", "unknown")
 
+            # Log all hook data with truncated values
+            truncated_tool_input = self._truncate_params(tool_input) if isinstance(tool_input, dict) else str(tool_input)[:200]
+            truncated_tool_response = self._truncate_params(tool_response) if isinstance(tool_response, dict) else str(tool_response)[:200]
+            
             logger.info(
                 "Processing PostToolUse hook",
                 session_id=session_id,
@@ -212,9 +288,10 @@ class UnixSocketServer:
                     if isinstance(tool_response, dict)
                     else "non-dict"
                 ),
-                tool_input_full=tool_input,  # Log input for reference
-                tool_response_full=tool_response,
-            )  # Log complete response structure
+                tool_input_truncated=truncated_tool_input,
+                tool_response_truncated=truncated_tool_response,
+                all_params=self._truncate_params(hook_data),
+            )
 
             # Send notification about tool result
             asyncio.create_task(
@@ -241,12 +318,13 @@ class UnixSocketServer:
             session_id = hook_data.get("session_id", "unknown")
             transcript_path = hook_data.get("transcript_path", "")
 
+            # Log all hook data with truncated values
             logger.info(
                 "Processing Notification hook",
                 session_id=session_id,
-                message=message,
+                message_preview=message[:200] + "..." if len(message) > 200 else message,
                 transcript_path=transcript_path,
-                full_data=hook_data,
+                all_params=self._truncate_params(hook_data),
             )
 
             # Check if this is a permission dialog based on recent tool usage context
@@ -323,7 +401,16 @@ class UnixSocketServer:
 
             return {"continue": True}
 
-        return {"status": "error", "message": f"Unknown hook type: {hook_type}"}
+        # Log any other hook types we might receive
+        logger.info(
+            f"Received unhandled hook type: {hook_type}",
+            hook_type=hook_type,
+            session_id=hook_data.get("session_id", "unknown"),
+            all_params=self._truncate_params(hook_data),
+        )
+        
+        # Still return continue=True for unknown hooks so Claude isn't blocked
+        return {"status": "ok", "continue": True}
 
     def _is_permission_dialog(self, session_id: str) -> bool:
         """Check if a notification is a permission dialog based on recent tool usage context.

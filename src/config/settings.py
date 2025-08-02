@@ -65,6 +65,10 @@ class Settings(BaseSettings):
         None,
         description="tmux pane target (session:window.pane format). Leave empty for auto-discovery.",
     )
+    filter_hooks_by_cwd: bool = Field(
+        True,
+        description="Only process hooks from Claude instances in the same working directory",
+    )
 
     # Monitoring
     log_level: str = Field("INFO", description="Logging level")

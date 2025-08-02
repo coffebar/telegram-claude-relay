@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 import structlog
 
@@ -730,11 +731,72 @@ class ConversationMonitor:
 
             # Format based on tool type with completion status
             if tool_name == "Edit":
+                # Show which file was edited
+                params = notification.get("parameters", {})
+                file_path = params.get("file_path", "")
+                if file_path:
+                    return f"✅ **Edit completed:** `{file_path}`"
                 return "✅ **Edit completed**"
+            elif tool_name == "MultiEdit":
+                # Show which file and how many edits
+                params = notification.get("parameters", {})
+                file_path = params.get("file_path", "")
+                edits = params.get("edits", [])
+                edit_count = len(edits)
+                if file_path:
+                    return f"✅ **{edit_count} edit(s) completed:** `{file_path}`"
+                return f"✅ **{edit_count} edit(s) completed**"
             elif tool_name == "Write":
+                # Show which file was created with size info
+                params = notification.get("parameters", {})
+                file_path = params.get("file_path", "")
+                content = params.get("content", "")
+                if file_path:
+                    size_info = f" ({len(content)} chars)" if content else ""
+                    return f"✅ **File created:** `{file_path}`{size_info}"
                 return "✅ **File created**"
             elif tool_name == "Read":
                 return None  # Silenced for better UX
+            elif tool_name == "LS":
+                # Format LS tool response with actual directory contents
+                message = "✅ **Directory listing:**"
+                if isinstance(tool_response, str) and tool_response.strip():
+                    # Truncate if too long (Telegram has message size limits)
+                    content = tool_response.strip()
+                    if len(content) > 3000:
+                        content = content[:3000] + "\n... (truncated)"
+                    message += f"\n```\n{content}\n```"
+                return message
+            elif tool_name == "Grep":
+                # Format Grep results with match count and preview
+                message = "✅ **Search completed**"
+                if isinstance(tool_response, dict):
+                    mode = tool_response.get("mode", "")
+                    num_lines = tool_response.get("numLines", 0)
+                    num_files = tool_response.get("numFiles", 0)
+                    
+                    if mode == "files_with_matches":
+                        filenames = tool_response.get("filenames", [])
+                        if filenames:
+                            message += f"\nFound in {len(filenames)} file(s):"
+                            for fname in filenames[:10]:  # Show first 10
+                                message += f"\n• `{fname}`"
+                            if len(filenames) > 10:
+                                message += f"\n... and {len(filenames) - 10} more"
+                    elif mode == "count":
+                        message += f"\nTotal matches: {num_lines}"
+                    elif mode == "content" and num_lines > 0:
+                        message += f"\nFound {num_lines} matching line(s)"
+                        content = tool_response.get("content", "")
+                        if content:
+                            # Show preview of matches
+                            preview = content[:500]
+                            if len(content) > 500:
+                                preview += "\n... (truncated)"
+                            message += f"\n```\n{preview}\n```"
+                    else:
+                        message += "\nNo matches found"
+                return message
             elif tool_name == "Bash":
                 # For Bash commands, include the output
                 message = "✅ **Command completed**"
@@ -750,8 +812,6 @@ class ConversationMonitor:
                         message += f"\n\n**Error output:**\n```\n{stderr}\n```"
 
                 return message
-            elif tool_name == "Grep":
-                return "✅ **Search completed**"
             elif tool_name == "Glob":
                 return "✅ **File search completed**"
             elif tool_name == "MultiEdit":

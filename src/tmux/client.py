@@ -172,6 +172,33 @@ class TmuxClient:
                 ) from e
             raise
 
+    async def get_pane_cwd(self) -> str:
+        """Get the current working directory of the target pane.
+
+        Returns:
+            Current working directory path
+
+        Raises:
+            TmuxPaneNotFoundError: If pane is not found
+        """
+        try:
+            cwd = await self._run_tmux_command(
+                [
+                    "display-message",
+                    "-t",
+                    self.pane_target,
+                    "-p",
+                    "#{pane_current_path}",
+                ]
+            )
+            return cwd.strip()
+        except TmuxCommandError as e:
+            if "can't find pane" in str(e).lower():
+                raise TmuxPaneNotFoundError(
+                    f"Pane not found: {self.pane_target}"
+                ) from e
+            raise
+
     async def wait_for_output_change(
         self, initial_output: str, timeout: int = 30, poll_interval: float = 1.0
     ) -> str:

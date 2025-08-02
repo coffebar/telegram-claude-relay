@@ -184,6 +184,14 @@ async def run_application(app: Dict[str, Any]) -> None:
 
             # Start Unix socket server
             socket_server = UnixSocketServer(config, monitor)
+            
+            # Ensure tmux integration is initialized and pass client reference
+            await claude_integration._ensure_tmux_integration()
+            if hasattr(claude_integration, 'tmux_integration') and claude_integration.tmux_integration:
+                if hasattr(claude_integration.tmux_integration, 'tmux_client'):
+                    socket_server.set_tmux_client(claude_integration.tmux_integration.tmux_client)
+                    logger.info("Set tmux client reference for CWD filtering")
+            
             socket_task = asyncio.create_task(socket_server.start())
             logger.info("Unix socket server started")
 

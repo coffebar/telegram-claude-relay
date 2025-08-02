@@ -80,6 +80,7 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 - **Automated Setup**: One-command installation with automatic Claude hooks configuration
 - **System Monitoring**: Built-in status checks and log streaming
 - **Diff Formatting**: Code edits displayed in unified diff format for easy review
+- **CWD-based Hook Filtering**: Only processes hooks from Claude instance in the tmux session
 
 ## Configuration
 
@@ -150,16 +151,7 @@ tmux send-keys -t claude-session "claude" Enter
 
 ## TODO
 
-### Event Filtering
-
-- [ ] **tmux Session Filtering**: Only process hooks from the specific tmux session
-  - Add session ID to hook payloads
-  - Filter out hooks from other Claude instances
-  - Prevent cross-session message contamination
-  - Support multiple bots with different tmux sessions (independent setups)
-
-### Optimizations
-
+- [ ] Support multiple bots with different tmux sessions (independent setups)
 - [ ] Disable logging when not debugging
 
 ### Tool Usage Transparency
