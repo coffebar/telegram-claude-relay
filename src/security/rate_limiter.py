@@ -141,6 +141,7 @@ class RateLimiter:
                 last_update=datetime.utcnow(),
                 refill_rate=self.refill_rate,
             )
+            self._limit_dict_size()
             logger.debug("Created rate limit bucket", user_id=user_id)
 
         return self.request_buckets[user_id]
@@ -204,3 +205,21 @@ class RateLimiter:
             )
 
         return len(inactive_users)
+
+    def _limit_dict_size(self, max_size: int = 1000) -> None:
+        """Remove oldest entries if dictionaries exceed max_size."""
+        if len(self.request_buckets) <= max_size:
+            return
+            
+        # Sort by last_update timestamp to remove oldest
+        sorted_buckets = sorted(
+            self.request_buckets.items(), 
+            key=lambda x: x[1].last_update
+        )
+        
+        # Remove oldest entries to get back to max_size
+        entries_to_remove = len(self.request_buckets) - max_size
+        for i in range(entries_to_remove):
+            user_id_to_remove = sorted_buckets[i][0]
+            self.request_buckets.pop(user_id_to_remove, None)
+            self.locks.pop(user_id_to_remove, None)
