@@ -125,6 +125,7 @@ class MessageTracker:
             "tool_name": tool_name,
             "timestamp": time.time(),
         }
+        self._limit_dict_size(self.pending_tool_operations)
 
         logger.info(
             "Registered tool operation",
@@ -194,6 +195,30 @@ class MessageTracker:
                 "Cleaned up expired tool operation", operation_key=operation_key
             )
 
+    def _limit_dict_size(self, target_dict: Dict, max_size: int = 1000) -> None:
+        """Remove oldest entries if dict exceeds max_size."""
+        if len(target_dict) <= max_size:
+            return
+            
+        # Get items with timestamps, fallback to arbitrary order for dicts without timestamps
+        items = list(target_dict.items())
+        
+        # Try to sort by timestamp if available
+        try:
+            if items and isinstance(items[0][1], dict) and "timestamp" in items[0][1]:
+                items.sort(key=lambda x: x[1].get("timestamp", 0))
+            else:
+                # For dicts without timestamps, just remove from the beginning
+                pass
+        except (IndexError, KeyError, TypeError):
+            pass
+        
+        # Remove oldest entries to get back to max_size
+        entries_to_remove = len(target_dict) - max_size
+        for i in range(entries_to_remove):
+            key_to_remove = items[i][0]
+            del target_dict[key_to_remove]
+
     def track_message(
         self,
         user_id: int,
@@ -210,6 +235,7 @@ class MessageTracker:
                 "type": message_type,
                 "content": content,
             }
+            self._limit_dict_size(self.last_status_messages)
 
 
 class ConversationWebhookHandler:
@@ -227,6 +253,30 @@ class ConversationWebhookHandler:
         self.permission_dialogs: Dict[str, Dict[str, Any]] = (
             {}
         )  # dialog_id -> dialog info
+
+    def _limit_dict_size(self, target_dict: Dict, max_size: int = 1000) -> None:
+        """Remove oldest entries if dict exceeds max_size."""
+        if len(target_dict) <= max_size:
+            return
+            
+        # Get items with timestamps, fallback to arbitrary order for dicts without timestamps
+        items = list(target_dict.items())
+        
+        # Try to sort by timestamp if available
+        try:
+            if items and isinstance(items[0][1], dict) and "timestamp" in items[0][1]:
+                items.sort(key=lambda x: x[1].get("timestamp", 0))
+            else:
+                # For dicts without timestamps, just remove from the beginning
+                pass
+        except (IndexError, KeyError, TypeError):
+            pass
+        
+        # Remove oldest entries to get back to max_size
+        entries_to_remove = len(target_dict) - max_size
+        for i in range(entries_to_remove):
+            key_to_remove = items[i][0]
+            del target_dict[key_to_remove]
 
     async def handle_conversation_update(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Process incoming conversation update from Claude hook."""
@@ -450,6 +500,7 @@ class ConversationWebhookHandler:
                         "tool_name": tool_name,
                         "timestamp": __import__("time").time(),
                     }
+                    self.message_tracker._limit_dict_size(self.message_tracker.pending_tool_operations)
 
                     logger.info(
                         "Pre-registered tool operation (immediate)",
@@ -782,6 +833,7 @@ class ConversationWebhookHandler:
             "options": options,
             "timestamp": message.get("timestamp"),
         }
+        self._limit_dict_size(self.permission_dialogs)
 
         # Create inline keyboard with the 3 options
         keyboard = [
@@ -956,11 +1008,13 @@ class ConversationWebhookHandler:
     def register_session(self, session_id: str, chat_id: int) -> None:
         """Register a session with a chat ID for targeted updates."""
         self.session_to_chat[session_id] = chat_id
+        self._limit_dict_size(self.session_to_chat)
         logger.info("Registered session", session_id=session_id, chat_id=chat_id)
 
     def record_telegram_prompt(self, user_id: int, prompt: str) -> None:
         """Record a prompt sent from Telegram to prevent echo."""
         self.last_telegram_prompts[user_id] = prompt
+        self._limit_dict_size(self.last_telegram_prompts)
         logger.debug(
             "Recorded Telegram prompt", user_id=user_id, prompt_length=len(prompt)
         )
