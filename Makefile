@@ -18,7 +18,7 @@ help:
 	@echo "  make logs          - Tail bot logs with live updates"
 	@echo "  make install-hooks - Install Claude Code hooks"
 	@echo "  make uninstall-hooks - Uninstall Claude Code hooks"
-	@echo "  make update-tool-schemas - Update tool schemas documentation from logs"
+	@echo "  make update-tool-schemas - Update tool schemas documentation from Claude JSONL files"
 	@echo ""
 	@echo "Other:"
 	@echo "  make setup         - Create virtual environment and install dependencies"
@@ -137,12 +137,12 @@ logs:
 	@echo "=========================================="
 	@tail -f telegram-claude-bot.log 2>/dev/null | grep -v "DEBUG" || echo "❌ Log file not found. Bot may not have been started yet."
 
-# Update tool schemas documentation from logs
+# Update tool schemas documentation from Claude JSONL files
 update-tool-schemas:
 	@echo "📊 Updating tool schemas documentation..."
-	@if [ -f "telegram-claude-bot.log" ]; then \
-		./venv/bin/python scripts/analyze_tool_schemas.py --update --output tool_schemas.json; \
-		echo "✅ Tool schemas updated: tool_schemas.json"; \
+	@if [ -d "$(HOME)/.claude/projects" ]; then \
+		./venv/bin/python scripts/analyze_tool_schemas.py --update --output tool_schemas.json --days 7; \
+		echo "✅ Tool schemas updated from JSONL files: tool_schemas.json"; \
 	else \
-		echo "❌ Log file not found. Start the bot to generate logs first."; \
+		echo "❌ Claude projects directory not found at $(HOME)/.claude/projects"; \
 	fi
