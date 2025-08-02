@@ -12,7 +12,7 @@ from typing import Any, Dict
 import structlog
 
 from src import __version__
-from src.bot.core import ClaudeCodeBot
+from src.bot.core import ClaudeTelegramBot
 from src.claude import ClaudeIntegration
 from src.config.settings import Settings
 from src.exceptions import ConfigurationError
@@ -119,7 +119,7 @@ async def create_application(config: Settings) -> Dict[str, Any]:
         "claude_integration": claude_integration,
     }
 
-    bot = ClaudeCodeBot(config, dependencies)
+    bot = ClaudeTelegramBot(config, dependencies)
 
     logger.info("Application components created successfully")
 
@@ -133,7 +133,7 @@ async def create_application(config: Settings) -> Dict[str, Any]:
 async def run_application(app: Dict[str, Any]) -> None:
     """Run the application with graceful shutdown handling."""
     logger = structlog.get_logger()
-    bot: ClaudeCodeBot = app["bot"]
+    bot: ClaudeTelegramBot = app["bot"]
     claude_integration: ClaudeIntegration = app["claude_integration"]
     config: Settings = app["config"]
 
@@ -184,14 +184,19 @@ async def run_application(app: Dict[str, Any]) -> None:
 
             # Start Unix socket server
             socket_server = UnixSocketServer(config, monitor)
-            
+
             # Ensure tmux integration is initialized and pass client reference
             await claude_integration._ensure_tmux_integration()
-            if hasattr(claude_integration, 'tmux_integration') and claude_integration.tmux_integration:
-                if hasattr(claude_integration.tmux_integration, 'tmux_client'):
-                    socket_server.set_tmux_client(claude_integration.tmux_integration.tmux_client)
+            if (
+                hasattr(claude_integration, "tmux_integration")
+                and claude_integration.tmux_integration
+            ):
+                if hasattr(claude_integration.tmux_integration, "tmux_client"):
+                    socket_server.set_tmux_client(
+                        claude_integration.tmux_integration.tmux_client
+                    )
                     logger.info("Set tmux client reference for CWD filtering")
-            
+
             socket_task = asyncio.create_task(socket_server.start())
             logger.info("Unix socket server started")
 

@@ -7,7 +7,7 @@ import structlog
 
 from ..config.settings import Settings
 from .responses import ClaudeResponse, StreamUpdate
-from .tmux_integration import TmuxClaudeIntegration
+from .tmux_integration import ClaudeTmuxIntegration
 
 
 logger = structlog.get_logger()
@@ -19,7 +19,7 @@ class ClaudeIntegration:
     def __init__(
         self,
         config: Settings,
-        tmux_integration: Optional[TmuxClaudeIntegration] = None,
+        tmux_integration: Optional[ClaudeTmuxIntegration] = None,
     ):
         """Initialize minimal Claude integration."""
         self.config = config
@@ -49,7 +49,7 @@ class ClaudeIntegration:
 
             pane_target = await self._get_pane_target()
             tmux_client = TmuxClient(pane_target)
-            self.tmux_integration = TmuxClaudeIntegration(self.config, tmux_client)
+            self.tmux_integration = ClaudeTmuxIntegration(self.config, tmux_client)
 
         self.manager = self.tmux_integration
 
