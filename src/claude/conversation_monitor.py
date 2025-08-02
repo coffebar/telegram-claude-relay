@@ -607,14 +607,21 @@ class ConversationMonitor:
 
             # EVIDENCE-BASED formatting - only tools with verified parameter structures
             if tool_name == "Bash":
-                # VERIFIED: {"command": "docker ps", "description": "Show running Docker containers"}
+                # VERIFIED: {"command": "docker ps", "description": "Show running Docker containers", "timeout": 120000}
                 command = params.get("command", "")
                 description = params.get("description", "")
+                timeout = params.get("timeout")
 
                 # Format with full command in code block
                 message = "💻 **Bash**"
                 if description:
                     message += f" - {description}"
+
+                # Add timeout info if specified
+                if timeout and timeout != 120000:  # Only show if different from default
+                    timeout_sec = timeout / 1000
+                    message += f" (timeout: {timeout_sec}s)"
+
                 message += f"\n```bash\n{command}\n```"
                 return message
 
@@ -624,16 +631,20 @@ class ConversationMonitor:
                 return f"📂 **Listing:** `{path}`"
 
             elif tool_name == "Edit":
-                # VERIFIED: {"file_path": "/path/to/file", "old_string": "...", "new_string": "..."}
+                # VERIFIED: {"file_path": "/path/to/file", "old_string": "...", "new_string": "...", "replace_all": false}
                 file_path = params.get("file_path", "")
                 old_string = params.get("old_string", "")
                 new_string = params.get("new_string", "")
+                replace_all = params.get("replace_all", False)
 
                 # Get file language for syntax highlighting
                 lang = self._detect_language(file_path)
 
                 # Format the code changes
-                message = f"✏️ **Editing:** `{file_path}`\n"
+                message = f"✏️ **Editing:** `{file_path}`"
+                if replace_all:
+                    message += " (replace all)"
+                message += "\n"
 
                 # If both old and new strings exist, create a diff
                 if old_string and new_string:
@@ -713,22 +724,55 @@ class ConversationMonitor:
                 return message
 
             elif tool_name == "Grep":
-                # VERIFIED: {"pattern": "search_pattern", "path": "/path", "output_mode": "content"}
+                # VERIFIED: {"pattern": "search_pattern", "path": "/path", "output_mode": "content", "-A": 3, "-B": 2}
                 pattern = params.get("pattern", "")
                 path = params.get("path", "")
                 output_mode = params.get("output_mode", "files_with_matches")
+                context_after = params.get("-A")
+                context_before = params.get("-B")
+                context_both = params.get("-C")
+                case_insensitive = params.get("-i", False)
+                line_numbers = params.get("-n", False)
+                multiline = params.get("multiline", False)
 
                 # Format with full pattern in code block
                 message = f"🔍 **Searching in:** `{path}`"
+
+                # Add mode and flags info
+                mode_parts = []
                 if output_mode != "files_with_matches":
-                    message += f" ({output_mode})"
+                    mode_parts.append(output_mode)
+                if case_insensitive:
+                    mode_parts.append("case-insensitive")
+                if line_numbers:
+                    mode_parts.append("line numbers")
+                if multiline:
+                    mode_parts.append("multiline")
+
+                # Add context info
+                if context_both:
+                    mode_parts.append(f"±{context_both} lines")
+                elif context_before or context_after:
+                    if context_before:
+                        mode_parts.append(f"-{context_before} lines before")
+                    if context_after:
+                        mode_parts.append(f"+{context_after} lines after")
+
+                if mode_parts:
+                    message += f" ({', '.join(mode_parts)})"
+
                 message += f"\n```regex\n{pattern}\n```"
                 return message
 
             elif tool_name == "Glob":
-                # VERIFIED: {"pattern": "*requirements*.txt"}
+                # VERIFIED: {"pattern": "*requirements*.txt", "path": "/home/..."}
                 pattern = params.get("pattern", "")
-                return f"🗂️ **Finding files:** `{pattern}`"
+                path = params.get("path", "")
+
+                message = f"🗂️ **Finding files:** `{pattern}`"
+                if path:
+                    message += f" in `{path}`"
+                return message
 
             elif tool_name == "MultiEdit":
                 # VERIFIED: {"file_path": "/path/to/file", "edits": [{"old_string": "...", "new_string": "..."}]}
@@ -770,6 +814,35 @@ class ConversationMonitor:
                 query = params.get("query", "")
                 return f"🌐 **Web Search:**\n```\n{query}\n```"
 
+            elif tool_name == "ExitPlanMode":
+                # VERIFIED: {"plan": "plan content"}
+                return "📋 **Planning Complete**"
+
+            elif tool_name == "Task":
+                # VERIFIED: {"description": "task description", "prompt": "detailed prompt", "subagent_type": "agent type"}
+                description = params.get("description", "")
+                subagent_type = params.get("subagent_type", "")
+                prompt = params.get("prompt", "")
+
+                message = f"🤖 **Starting Task:** {description}"
+                if subagent_type:
+                    message += f"\n**Agent:** {subagent_type}"
+                if prompt and len(prompt) <= 200:
+                    message += f"\n**Prompt:** {prompt}"
+                elif prompt:
+                    message += f"\n**Prompt:** {prompt[:200]}..."
+                return message
+
+            elif tool_name == "WebFetch":
+                # VERIFIED: {"url": "https://...", "prompt": "extraction prompt"}
+                url = params.get("url", "")
+                prompt = params.get("prompt", "")
+
+                message = f"🌐 **Fetching:** {url}"
+                if prompt:
+                    message += f"\n**Extract:** {prompt}"
+                return message
+
             else:
                 # Unknown/unverified tool - generic display
                 return f"🔧 **{tool_name}**"
@@ -780,30 +853,73 @@ class ConversationMonitor:
 
             # Format based on tool type with completion status
             if tool_name == "Edit":
-                # Show which file was edited
+                # Show which file was edited with additional info
                 params = notification.get("parameters", {})
                 file_path = params.get("file_path", "")
+
+                message = "✅ **Edit completed**"
                 if file_path:
-                    return f"✅ **Edit completed:** `{file_path}`"
-                return "✅ **Edit completed**"
+                    message += f": `{file_path}`"
+
+                # Add structured patch and modification info
+                if isinstance(tool_response, dict):
+                    user_modified = tool_response.get("userModified", False)
+                    structured_patch = tool_response.get("structuredPatch")
+
+                    if user_modified:
+                        message += " ⚠️ *user modified*"
+
+                    if structured_patch and isinstance(structured_patch, list):
+                        patch_count = len(structured_patch)
+                        if patch_count > 1:
+                            message += f" ({patch_count} patches)"
+
+                return message
             elif tool_name == "MultiEdit":
-                # Show which file and how many edits
+                # Show which file and how many edits with additional info
                 params = notification.get("parameters", {})
                 file_path = params.get("file_path", "")
                 edits = params.get("edits", [])
                 edit_count = len(edits)
+
+                message = f"✅ **{edit_count} edit(s) completed**"
                 if file_path:
-                    return f"✅ **{edit_count} edit(s) completed:** `{file_path}`"
-                return f"✅ **{edit_count} edit(s) completed**"
+                    message += f": `{file_path}`"
+
+                # Add structured patch and modification info
+                if isinstance(tool_response, dict):
+                    user_modified = tool_response.get("userModified", False)
+                    structured_patch = tool_response.get("structuredPatch")
+
+                    if user_modified:
+                        message += " ⚠️ *user modified*"
+
+                    if structured_patch and isinstance(structured_patch, list):
+                        patch_count = len(structured_patch)
+                        if patch_count != edit_count:
+                            message += f" ({patch_count} patches)"
+
+                return message
             elif tool_name == "Write":
-                # Show which file was created with size info
+                # Show which file was created with size and patch info
                 params = notification.get("parameters", {})
                 file_path = params.get("file_path", "")
                 content = params.get("content", "")
+
+                message = "✅ **File written**"
                 if file_path:
                     size_info = f" ({len(content)} chars)" if content else ""
-                    return f"✅ **File created:** `{file_path}`{size_info}"
-                return "✅ **File created**"
+                    message += f": `{file_path}`{size_info}"
+
+                # Add structured patch info if available
+                if isinstance(tool_response, dict):
+                    structured_patch = tool_response.get("structuredPatch")
+                    if structured_patch and isinstance(structured_patch, list):
+                        patch_count = len(structured_patch)
+                        if patch_count > 0:
+                            message += f" ({patch_count} patches)"
+
+                return message
             elif tool_name == "Read":
                 return None  # Silenced for better UX
             elif tool_name == "LS":
@@ -846,13 +962,30 @@ class ConversationMonitor:
                         message += "\nNo matches found"
                 return message
             elif tool_name == "Bash":
-                # For Bash commands, include the output
+                # For Bash commands, include the output and status
                 message = "✅ **Command completed**"
 
                 # Extract stdout and stderr from the tool response
                 if isinstance(tool_response, dict):
                     stdout = tool_response.get("stdout", "").strip()
                     stderr = tool_response.get("stderr", "").strip()
+                    interrupted = tool_response.get("interrupted", False)
+                    return_code_interpretation = tool_response.get(
+                        "returnCodeInterpretation", ""
+                    )
+
+                    # Add status indicators
+                    status_parts = []
+                    if interrupted:
+                        status_parts.append("⚠️ interrupted")
+                    if (
+                        return_code_interpretation
+                        and return_code_interpretation != "success"
+                    ):
+                        status_parts.append(f"status: {return_code_interpretation}")
+
+                    if status_parts:
+                        message += f" ({', '.join(status_parts)})"
 
                     if stdout:
                         message += f"\n\n**Output:**\n```\n{stdout}\n```"
@@ -861,11 +994,87 @@ class ConversationMonitor:
 
                 return message
             elif tool_name == "Glob":
-                return "✅ **File search completed**"
-            elif tool_name == "MultiEdit":
-                return "✅ **Multi-edit completed**"
+                # Glob completion with performance metrics
+                message = "✅ **File search completed**"
+                if isinstance(tool_response, dict):
+                    num_files = tool_response.get("numFiles")
+                    duration = tool_response.get("durationMs")
+                    truncated = tool_response.get("truncated", False)
+
+                    metrics = []
+                    if num_files is not None:
+                        metrics.append(f"{num_files} files")
+                    if duration:
+                        metrics.append(f"{duration}ms")
+
+                    if metrics:
+                        message += f" ({', '.join(metrics)})"
+
+                    if truncated:
+                        message += " ⚠️ *truncated*"
+
+                return message
             elif tool_name == "WebSearch":
-                return "✅ **Web search completed**"
+                # WebSearch completion with duration metrics
+                message = "✅ **Web search completed**"
+                if isinstance(tool_response, dict):
+                    duration = tool_response.get("durationSeconds")
+                    results = tool_response.get("results", [])
+
+                    metrics = []
+                    if len(results) > 0:
+                        metrics.append(f"{len(results)} results")
+                    if duration:
+                        metrics.append(f"{duration:.1f}s")
+
+                    if metrics:
+                        message += f" ({', '.join(metrics)})"
+
+                return message
+            elif tool_name == "ExitPlanMode":
+                # ExitPlanMode indicates planning is complete and ready to proceed
+                return "✅ **Plan ready - awaiting approval**"
+            elif tool_name == "Task":
+                # Task completion with performance metrics
+                message = "✅ **Task completed**"
+                if isinstance(tool_response, dict):
+                    duration = tool_response.get("totalDurationMs")
+                    tokens = tool_response.get("totalTokens")
+                    tool_count = tool_response.get("totalToolUseCount")
+                    was_interrupted = tool_response.get("wasInterrupted", False)
+
+                    metrics = []
+                    if duration:
+                        metrics.append(f"{duration}ms")
+                    if tokens:
+                        metrics.append(f"{tokens} tokens")
+                    if tool_count:
+                        metrics.append(f"{tool_count} tools")
+
+                    if metrics:
+                        message += f" ({', '.join(metrics)})"
+
+                    if was_interrupted:
+                        message += " ⚠️ *interrupted*"
+
+                return message
+            elif tool_name == "WebFetch":
+                # WebFetch completion with response info
+                message = "✅ **Fetch completed**"
+                if isinstance(tool_response, dict):
+                    url = tool_response.get("url", "")
+                    code = tool_response.get("code")
+                    duration = tool_response.get("durationMs")
+                    bytes_fetched = tool_response.get("bytes")
+
+                    if code:
+                        message += f" ({code})"
+                    if duration:
+                        message += f" in {duration}ms"
+                    if bytes_fetched:
+                        message += f" - {bytes_fetched} bytes"
+
+                return message
             else:
                 return f"✅ **{tool_name} completed**"
 

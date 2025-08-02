@@ -3,10 +3,10 @@
 from typing import Any, Dict, Optional
 
 import structlog
+import telegramify_markdown
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
-import telegramify_markdown
 
 from ...config.settings import Settings
 from ..utils.message_sender import RobustMessageSender
@@ -349,8 +349,16 @@ class ConversationWebhookHandler:
 
         # Format based on message type
         if msg_type == "message" and role == "assistant":
-            # Regular Claude response - use as-is since Claude outputs clean markdown
-            return f"🤖 *Claude:*\n{content}"
+            # Regular Claude response - use telegramify-markdown for proper conversion
+            try:
+                converted_content = telegramify_markdown.markdownify(content)
+                return f"🤖 *Claude:*\n{converted_content}"
+            except Exception as e:
+                logger.warning(
+                    "Failed to convert Claude response content", error=str(e)
+                )
+                # Fallback to raw content with simple prefix
+                return f"🤖 *Claude:*\n{content}"
 
         elif msg_type == "message" and role == "user":
             # Echo user messages (optional)

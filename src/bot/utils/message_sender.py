@@ -3,9 +3,11 @@
 from typing import Any, Optional, Union
 
 import structlog
+
 from telegram import Bot, InlineKeyboardMarkup, Message
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
+
 
 logger = structlog.get_logger()
 
