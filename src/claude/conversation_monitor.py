@@ -726,7 +726,7 @@ class ConversationMonitor:
             elif tool_name == "Grep":
                 # VERIFIED: {"pattern": "search_pattern", "path": "/path", "output_mode": "content", "-A": 3, "-B": 2}
                 pattern = params.get("pattern", "")
-                path = params.get("path", "")
+                path = params.get("path", "CWD")
                 output_mode = params.get("output_mode", "files_with_matches")
                 context_after = params.get("-A")
                 context_before = params.get("-B")
@@ -736,7 +736,7 @@ class ConversationMonitor:
                 multiline = params.get("multiline", False)
 
                 # Format with full pattern in code block
-                message = f"🔍 **Searching in:** `{path}`"
+                message = f"🔍 **Grep in:** `{path}`"
 
                 # Add mode and flags info
                 mode_parts = []
