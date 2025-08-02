@@ -294,13 +294,20 @@ class ConversationMonitor:
                 message, context, simplified=True
             )
 
+            # Use different options for ExitPlanMode vs regular permissions
+            tool_use = context.get("tool_use") if context else None
+            if tool_use == "ExitPlanMode":
+                options = ["Auto-accept edits", "Follow plan with manual confirmation", "Keep planning"]
+            else:
+                options = ["Allow", "Allow and don't ask again", "Deny"]
+
             payload = {
                 "session_id": dialog_data.get("session_id", "unknown"),
                 "message": {
                     "type": "permission_dialog",
                     "role": "system",
                     "content": question,
-                    "options": ["Allow", "Allow and don't ask again", "Deny"],
+                    "options": options,
                     "timestamp": dialog_data.get(
                         "timestamp", datetime.now().isoformat()
                     ),
@@ -404,6 +411,14 @@ class ConversationMonitor:
                 if code_snippet and len(code_snippet) < 200:
                     lang = self._detect_language(file_path)
                     question += f"\n\n**First change preview:**\n```{lang}\n{code_snippet[:200]}...\n```"
+
+        elif tool_use == "ExitPlanMode":
+            # Special handling for ExitPlanMode - show the plan content
+            plan_content = context.get("plan", code_snippet)  # Plan might be in 'plan' field or 'code_snippet'
+            if plan_content:
+                question = f"📋 **Plan Ready**\n\n{plan_content}\n\n**How would you like to proceed?**"
+            else:
+                question = f"📋 **Plan Ready**\n\nClaude has finished planning and is ready to proceed.\n\n**How would you like to proceed?**"
 
         else:
             # Generic tool or unknown
