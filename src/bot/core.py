@@ -31,7 +31,7 @@ from ..exceptions import ClaudeCodeTelegramError
 logger = structlog.get_logger()
 
 
-class ClaudeCodeBot:
+class ClaudeTelegramBot:
     """Main bot orchestrator."""
 
     def __init__(self, settings: Settings, dependencies: Dict[str, Any]):
@@ -145,18 +145,9 @@ class ClaudeCodeBot:
         """Add middleware to application."""
         from .middleware.auth import auth_middleware
         from .middleware.rate_limit import rate_limit_middleware
-        from .middleware.security import security_middleware
 
         # Middleware runs in order of group numbers (lower = earlier)
-        # Security middleware first (validate inputs)
-        self.app.add_handler(
-            MessageHandler(
-                filters.ALL, self._create_middleware_handler(security_middleware)
-            ),
-            group=-3,
-        )
-
-        # Authentication second
+        # Authentication first
         self.app.add_handler(
             MessageHandler(
                 filters.ALL, self._create_middleware_handler(auth_middleware)
@@ -164,7 +155,7 @@ class ClaudeCodeBot:
             group=-2,
         )
 
-        # Rate limiting third
+        # Rate limiting second
         self.app.add_handler(
             MessageHandler(
                 filters.ALL, self._create_middleware_handler(rate_limit_middleware)

@@ -49,28 +49,6 @@ class DirectoryTraversalError(SecurityError):
     pass
 
 
-class ClaudeError(ClaudeCodeTelegramError):
-    """Claude Code-related errors."""
-
-    pass
-
-
-class ClaudeTimeoutError(ClaudeError):
-    """Claude Code operation timed out."""
-
-    pass
-
-
-class ClaudeProcessError(ClaudeError):
-    """Claude Code process execution failed."""
-
-    pass
-
-
-class ClaudeParsingError(ClaudeError):
-    """Failed to parse Claude Code output."""
-
-    pass
 
 
 class StorageError(ClaudeCodeTelegramError):
