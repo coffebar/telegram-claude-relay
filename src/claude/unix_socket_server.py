@@ -144,6 +144,7 @@ class UnixSocketServer:
         hook_type = hook_data.get("hook_event_name")
         hook_cwd = hook_data.get("cwd") or hook_data.get("current_working_directory")
 
+        # Enhanced logging for all hook events
         logger.info(
             "Received hook event",
             hook_type=hook_type,
@@ -151,6 +152,19 @@ class UnixSocketServer:
             target_cwd=self.target_cwd,
             data_keys=list(hook_data.keys()),
         )
+        
+        # Extra detailed logging for Notification hooks to understand permission patterns
+        if hook_type == "Notification":
+            message = hook_data.get("message", "")
+            logger.info(
+                "Notification hook details",
+                session_id=hook_data.get("session_id", "unknown"),
+                full_message=message,  # Full message without truncation
+                message_length=len(message),
+                transcript_path=hook_data.get("transcript_path", ""),
+                timestamp=hook_data.get("timestamp", ""),
+                all_hook_data=hook_data,  # Complete hook data for pattern analysis
+            )
 
         # Check if we should process this hook based on CWD (if filtering is enabled)
         if self.config.filter_hooks_by_cwd and self.target_cwd and hook_cwd:
@@ -233,14 +247,16 @@ class UnixSocketServer:
 
             # Track this tool usage for permission dialog detection
             self.recent_tool_usage[session_id] = time.time()
+            self._limit_dict_size(self.recent_tool_usage)
 
             # Store tool context for fallback when transcript parsing fails
-            if tool_name in ["Edit", "MultiEdit", "Write", "Bash"]:
+            if tool_name in ["Edit", "MultiEdit", "Write", "Bash", "ExitPlanMode"]:
                 self.recent_tool_context[session_id] = {
                     "tool_use": tool_name,
                     "tool_input": tool_input,
                     "timestamp": time.time(),
                 }
+                self._limit_dict_size(self.recent_tool_context)
                 logger.debug(
                     "Stored tool context for fallback",
                     session_id=session_id,
@@ -342,23 +358,29 @@ class UnixSocketServer:
             session_id = hook_data.get("session_id", "unknown")
             transcript_path = hook_data.get("transcript_path", "")
 
-            # Log all hook data with truncated values
+            # Detailed logging for permission dialog analysis (replaces truncated logging above)
             logger.info(
                 "Processing Notification hook",
                 session_id=session_id,
-                message_preview=(
-                    message[:200] + "..." if len(message) > 200 else message
-                ),
+                full_message=message,  # Complete message for pattern analysis
+                message_type="permission_request" if "permission" in message.lower() else
+                            "idle_timeout" if "waiting for your input" in message.lower() else
+                            "unknown_notification",
                 transcript_path=transcript_path,
-                all_params=self._truncate_params(hook_data),
+                has_recent_tool_usage=session_id in self.recent_tool_usage,
+                recent_tool_context=self.recent_tool_context.get(session_id, {}),
             )
 
             # Check if this is a permission dialog based on message content
             if self._is_permission_dialog(session_id, message):
                 logger.info(
-                    "Detected permission dialog based on recent tool usage",
-                    message=message,
+                    "PERMISSION_DIALOG_DETECTED",  # Make it easy to grep for these
                     session_id=session_id,
+                    full_permission_message=message,
+                    recent_tool_used=self.recent_tool_context.get(session_id, {}).get("tool_use", "unknown"),
+                    tool_context_full=self.recent_tool_context.get(session_id, {}),
+                    notification_hook_data=hook_data,  # Complete hook data
+                    detection_method="message_content" if "permission" in message.lower() else "recent_tool_timing",
                 )
 
                 # Primary: Use recent PreToolUse hook data (most accurate for permission dialogs)
@@ -557,6 +579,11 @@ class UnixSocketServer:
                 )
         elif tool_name == "Bash":
             context_info["code_snippet"] = tool_input.get("command", "")
+        elif tool_name == "ExitPlanMode":
+            # For ExitPlanMode, extract the plan content
+            plan_content = tool_input.get("plan", "")
+            context_info["plan"] = plan_content
+            context_info["code_snippet"] = plan_content  # Also store in code_snippet for compatibility
 
         logger.info(
             "PreToolUse hook context built successfully",
@@ -591,6 +618,34 @@ class UnixSocketServer:
         for session_id in expired_context_sessions:
             del self.recent_tool_context[session_id]
             logger.debug("Cleaned up old tool context entry", session_id=session_id)
+
+    def _limit_dict_size(self, target_dict: Dict, max_size: int = 1000) -> None:
+        """Remove oldest entries if dict exceeds max_size."""
+        if len(target_dict) <= max_size:
+            return
+            
+        # Get items with timestamps, fallback to arbitrary order for dicts without timestamps
+        items = list(target_dict.items())
+        
+        # Try to sort by timestamp if available
+        try:
+            if items and isinstance(items[0][1], dict) and "timestamp" in items[0][1]:
+                # For tool_context dict with timestamp in the value
+                items.sort(key=lambda x: x[1].get("timestamp", 0))
+            elif items and isinstance(items[0][1], (int, float)):
+                # For tool_usage dict where value is the timestamp
+                items.sort(key=lambda x: x[1])
+            else:
+                # For dicts without timestamps, just remove from the beginning
+                pass
+        except (IndexError, KeyError, TypeError):
+            pass
+        
+        # Remove oldest entries to get back to max_size
+        entries_to_remove = len(target_dict) - max_size
+        for i in range(entries_to_remove):
+            key_to_remove = items[i][0]
+            del target_dict[key_to_remove]
 
     async def _get_permission_context_from_transcript(
         self, transcript_path: str
@@ -765,6 +820,19 @@ class UnixSocketServer:
                                         "Context extraction successful (Bash)",
                                         tool_name=tool_name,
                                         command=context_info.get("code_snippet"),
+                                        context_info=context_info,
+                                    )
+                                    return context_info
+
+                                elif tool_name == "ExitPlanMode":
+                                    context_info["tool_use"] = tool_name
+                                    plan_content = tool_input.get("plan", "")
+                                    context_info["plan"] = plan_content
+                                    context_info["code_snippet"] = plan_content  # Also store in code_snippet for compatibility
+                                    logger.info(
+                                        "Context extraction successful (ExitPlanMode)",
+                                        tool_name=tool_name,
+                                        plan_length=len(plan_content),
                                         context_info=context_info,
                                     )
                                     return context_info
