@@ -161,10 +161,7 @@ tmux send-keys -t claude-session "claude" Enter
 
 - [ ] Support multiple bots with different tmux sessions (independent setups)
 - [ ] Disable logging when not debugging
-
-### Security & Reliability
-
-- [ ] Fix resource leaks - ensure proper memory management
+- [ ] Remove header filename in diff output
 
 ### Tool Usage Transparency
 
