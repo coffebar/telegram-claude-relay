@@ -400,29 +400,59 @@ class UnixSocketServer:
                     ),
                 )
 
-                # Use only PreToolUse hook data as source
-                recent_context = self.recent_tool_context.get(session_id, {})
+                # Extract tool name from permission message (last word)
+                permission_tool_name = self._extract_tool_name_from_permission_message(
+                    message
+                )
 
-                if recent_context:
-                    # Build enhanced context with complete tool_input data
-                    context = {
-                        "tool_use": recent_context.get("tool_use"),
-                        "tool_input": recent_context.get("tool_input", {}),
-                        "timestamp": recent_context.get("timestamp"),
-                    }
-
-                    logger.info(
-                        "Built permission context from hook data",
-                        session_id=session_id,
-                        tool_name=context.get("tool_use"),
-                        tool_input_keys=list(context.get("tool_input", {}).keys()),
+                if permission_tool_name:
+                    # Try to find the most recent matching tool context
+                    context = self._find_matching_tool_context(
+                        session_id, permission_tool_name
                     )
+
+                    if context:
+                        logger.info(
+                            "Found matching tool context for permission dialog",
+                            session_id=session_id,
+                            permission_tool=permission_tool_name,
+                            actual_tool=context.get("tool_use"),
+                            tool_input_keys=list(context.get("tool_input", {}).keys()),
+                        )
+                    else:
+                        # Fallback to most recent context
+                        recent_context = self.recent_tool_context.get(session_id, {})
+                        if recent_context:
+                            context = recent_context
+                            logger.warning(
+                                "No matching tool found for permission dialog, using most recent",
+                                session_id=session_id,
+                                permission_tool=permission_tool_name,
+                                recent_tool=recent_context.get("tool_use"),
+                            )
+                        else:
+                            logger.warning(
+                                "No tool context available for permission dialog",
+                                session_id=session_id,
+                                permission_tool=permission_tool_name,
+                            )
+                            return {"continue": True}
                 else:
-                    logger.warning(
-                        "No PreToolUse hook context available for permission dialog",
-                        session_id=session_id,
-                    )
-                    return {"continue": True}
+                    # Can't parse tool name, use recent context
+                    recent_context = self.recent_tool_context.get(session_id, {})
+                    if recent_context:
+                        context = recent_context
+                        logger.warning(
+                            "Could not parse tool from permission message, using recent context",
+                            session_id=session_id,
+                            tool_name=recent_context.get("tool_use"),
+                        )
+                    else:
+                        logger.warning(
+                            "No tool context available for permission dialog",
+                            session_id=session_id,
+                        )
+                        return {"continue": True}
 
                 # Read tmux pane to get actual permission options
                 tmux_content = await self._read_tmux_pane_content()
@@ -713,6 +743,63 @@ class UnixSocketServer:
         except Exception as e:
             logger.error("Error reading tmux pane content", error=str(e))
             return ""
+
+    def _extract_tool_name_from_permission_message(self, message: str) -> Optional[str]:
+        """Extract tool name from permission message.
+
+        Format: "Claude needs your permission to use X" where X is the tool name.
+        """
+        if not message:
+            return None
+
+        # Split message and get the last word
+        words = message.strip().split()
+        if words:
+            tool_name = words[-1]
+            # Remove any punctuation
+            tool_name = tool_name.rstrip(".,!?")
+            return tool_name
+
+        return None
+
+    def _find_matching_tool_context(
+        self, session_id: str, permission_tool_name: str
+    ) -> Optional[Dict[str, Any]]:
+        """Find the most recent tool context that matches the permission dialog.
+
+        Maps permission tool names to actual tool names:
+        - "Read" -> Read
+        - "Update" -> Edit, MultiEdit, Write
+        - "Fetch" -> WebFetch, Fetch
+        """
+        # Get the most recent tool context
+        recent_context = self.recent_tool_context.get(session_id)
+        if not recent_context:
+            return None
+
+        actual_tool_name = recent_context.get("tool_use")
+
+        # Direct match
+        if permission_tool_name == actual_tool_name:
+            return recent_context
+
+        # Handle Update -> file modification tools mapping
+        if permission_tool_name == "Update" and actual_tool_name in [
+            "Edit",
+            "MultiEdit",
+            "Write",
+        ]:
+            return recent_context
+
+        # Handle Fetch -> web fetch tools mapping
+        if permission_tool_name == "Fetch" and actual_tool_name in [
+            "WebFetch",
+            "Fetch",
+        ]:
+            return recent_context
+
+        # No match found
+        return None
 
     def _parse_permission_options(self, tmux_content: str) -> List[str]:
         """Parse numbered list of permission options from tmux pane content."""

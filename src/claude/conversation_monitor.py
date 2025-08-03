@@ -459,10 +459,7 @@ class ConversationMonitor:
                 if file_path:
                     question += f"\n\n📂 **File:** `{file_path}` ({edit_text})"
 
-                # Show preview of first edit if available and not too long
-                if code_snippet and len(code_snippet) < 200:
-                    lang = self._detect_language(file_path)
-                    question += f"\n\n**First change preview:**\n```{lang}\n{code_snippet[:200]}...\n```"
+                # Note: Removed truncated preview for MultiEdit - full content is available in Pre-tool hook
 
         elif tool_use == "ExitPlanMode":
             # Special handling for ExitPlanMode - show the plan content
