@@ -26,6 +26,7 @@ from telegram.ext import (
 
 from ..config.settings import Settings
 from ..exceptions import ClaudeCodeTelegramError
+from .command_discovery import CommandDiscovery
 
 
 logger = structlog.get_logger()
@@ -40,10 +41,14 @@ class ClaudeTelegramBot:
         self.deps = dependencies
         self.app: Optional[Application] = None
         self.is_running = False
+        self.command_discovery: Optional[CommandDiscovery] = None
 
     async def initialize(self) -> None:
         """Initialize bot application."""
         logger.info("Initializing Telegram bot")
+
+        # Initialize command discovery
+        await self._initialize_command_discovery()
 
         # Create application
         builder = Application.builder()
@@ -61,7 +66,7 @@ class ClaudeTelegramBot:
         await self._set_bot_commands()
 
         # Register handlers
-        self._register_handlers()
+        await self._register_handlers()
 
         # Add middleware
         self._add_middleware()
@@ -71,23 +76,100 @@ class ClaudeTelegramBot:
 
         logger.info("Bot initialization complete")
 
+    async def _initialize_command_discovery(self) -> None:
+        """Initialize command discovery system."""
+        # Get project CWD from Claude integration if available
+        project_cwd = None
+        claude_integration = self.deps.get("claude_integration")
+
+        if claude_integration:
+            try:
+                # Ensure tmux integration is set up to get CWD
+                await claude_integration._ensure_tmux_integration()
+                if (
+                    claude_integration.tmux_integration
+                    and claude_integration.tmux_integration.tmux_client
+                ):
+                    project_cwd = (
+                        await claude_integration.tmux_integration.tmux_client.get_pane_cwd()
+                    )
+                    logger.info(
+                        "Got project CWD from Claude integration",
+                        project_cwd=project_cwd,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Could not get project CWD from Claude integration", error=str(e)
+                )
+
+        # Initialize command discovery
+        self.command_discovery = CommandDiscovery(project_cwd)
+
+        # Discover commands
+        await self.command_discovery.discover_commands()
+
     async def _set_bot_commands(self) -> None:
-        """Set bot command menu."""
-        commands = []
+        """Set bot command menu including discovered commands."""
+        from telegram import BotCommand, BotCommandScopeChat
 
-        await self.app.bot.set_my_commands(commands)
-        logger.info("Bot commands set", commands=[cmd.command for cmd in commands])
+        # Start with built-in commands
+        commands = [
+            BotCommand("clear", "Clear Claude's conversation history"),
+            BotCommand("compact", "Compact Claude's conversation"),
+        ]
 
-    def _register_handlers(self) -> None:
+        # Add discovered commands if available
+        if self.command_discovery:
+            discovered_commands = await self.command_discovery.discover_commands()
+            for command_name, metadata in discovered_commands.items():
+                commands.append(BotCommand(command_name, metadata["description"]))
+
+        # Set commands for each allowed user
+        # This provides better privacy and ensures only authorized users see commands
+        for user_id in self.settings.allowed_users:
+            try:
+                # Use BotCommandScopeChat to set commands for specific user
+                scope = BotCommandScopeChat(chat_id=user_id)
+                await self.app.bot.set_my_commands(commands, scope=scope)
+                logger.debug("Set commands for user", user_id=user_id)
+            except Exception as e:
+                logger.warning(
+                    "Failed to set commands for user", user_id=user_id, error=str(e)
+                )
+
+        logger.info(
+            "Bot commands set for authorized users",
+            total_commands=len(commands),
+            commands=[cmd.command for cmd in commands],
+            user_count=len(self.settings.allowed_users),
+        )
+
+    async def _register_handlers(self) -> None:
         """Register all command and message handlers."""
         from .handlers import command, message
 
+        # Register built-in command handlers
         handlers = [
             ("start", command.start_command),
+            ("clear", command.clear_command),
+            ("compact", command.compact_command),
         ]
 
         for cmd, handler in handlers:
             self.app.add_handler(CommandHandler(cmd, self._inject_deps(handler)))
+
+        # Register dynamic command handlers
+        if self.command_discovery:
+            discovered_commands = await self.command_discovery.discover_commands()
+            for command_name in discovered_commands.keys():
+                self.app.add_handler(
+                    CommandHandler(
+                        command_name,
+                        self._inject_deps(
+                            self._create_dynamic_command_handler(command_name)
+                        ),
+                    )
+                )
 
         self.app.add_handler(
             MessageHandler(
@@ -103,6 +185,28 @@ class ClaudeTelegramBot:
         )
 
         logger.info("Bot handlers registered")
+
+    def _create_dynamic_command_handler(self, command_name: str) -> Callable:
+        """Create a handler for a dynamically discovered command.
+
+        Args:
+            command_name: Name of the command to handle
+
+        Returns:
+            Async function that handles the command
+        """
+
+        async def dynamic_command_handler(
+            update: Update, context: ContextTypes.DEFAULT_TYPE
+        ) -> None:
+            """Handle dynamically discovered command - forwards to Claude."""
+            # Import here to avoid circular imports
+            from .handlers.command import _forward_claude_command
+
+            # Forward the command to Claude using the existing infrastructure
+            await _forward_claude_command(update, context, f"/{command_name}")
+
+        return dynamic_command_handler
 
     def _inject_deps(self, handler: Callable) -> Callable:
         """Inject dependencies into handlers."""

@@ -174,6 +174,7 @@ async def run_application(app: Dict[str, Any]) -> None:
 
             # Add webhook handler to bot dependencies
             bot.app.bot_data["webhook_handler"] = webhook_handler
+            bot.app.bot_data["message_sender"] = webhook_handler.message_sender
 
             # Initialize subscriptions for all allowed users
             await webhook_handler.initialize_subscriptions()

@@ -27,8 +27,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"👋 Hello {user.first_name}!\n\n"
         f"🤖 This bot connects you directly to Claude Code via tmux.\n\n"
         f"**How to use:**\n"
-        f"Just send any message and it will go directly to Claude.\n\n"
-        f"That's it! No commands needed."
+        f"Just send any message and it will go directly to Claude."
     )
 
     reply_markup = create_keyboard([])
@@ -39,3 +38,47 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # Log command
     logger.info("Start command executed", user_id=user.id)
+
+
+async def _forward_claude_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, command: str
+) -> None:
+    """Generic handler to forward commands to Claude."""
+    user = update.effective_user
+
+    # Get Claude integration from context
+    claude_integration = context.bot_data.get("claude_integration")
+    if not claude_integration:
+        await update.message.reply_text("❌ Claude service is not available.")
+        return
+
+    try:
+        # Send typing indicator
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action="typing"
+        )
+
+        # Send command directly to Claude via tmux
+        await claude_integration._ensure_tmux_integration()
+        await claude_integration.tmux_integration.tmux_client.send_command(command)
+
+    except Exception as e:
+        logger.error(
+            f"Error executing {command} command", error=str(e), user_id=user.id
+        )
+        await update.message.reply_text(
+            f"❌ Failed to execute {command}. Please try again."
+        )
+
+    # Log command
+    logger.info(f"{command} command executed", user_id=user.id)
+
+
+async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /clear command - forwards to Claude."""
+    await _forward_claude_command(update, context, "/clear")
+
+
+async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /compact command - forwards to Claude."""
+    await _forward_claude_command(update, context, "/compact")
