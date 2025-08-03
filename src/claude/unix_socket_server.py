@@ -248,7 +248,14 @@ class UnixSocketServer:
             self._limit_dict_size(self.recent_tool_usage)
 
             # Store tool context for fallback when transcript parsing fails
-            if tool_name in ["Edit", "MultiEdit", "Write", "Bash", "ExitPlanMode"]:
+            if tool_name in [
+                "Edit",
+                "MultiEdit",
+                "Write",
+                "Bash",
+                "ExitPlanMode",
+                "Read",
+            ]:
                 self.recent_tool_context[session_id] = {
                     "tool_use": tool_name,
                     "tool_input": tool_input,
@@ -603,6 +610,11 @@ class UnixSocketServer:
             context_info["code_snippet"] = (
                 plan_content  # Also store in code_snippet for compatibility
             )
+        elif tool_name == "Read":
+            # For Read, extract the file path
+            context_info["file_path"] = tool_input.get("file_path", "")
+            context_info["code_snippet"] = None
+            context_info["new_code"] = None
 
         logger.info(
             "PreToolUse hook context built successfully",
@@ -815,228 +827,6 @@ class UnixSocketServer:
         for i in range(entries_to_remove):
             key_to_remove = items[i][0]
             del target_dict[key_to_remove]
-
-    async def _get_permission_context_from_transcript(
-        self, transcript_path: str
-    ) -> Optional[Dict[str, Any]]:
-        """Get permission context from transcript file."""
-        try:
-            import json
-
-            from pathlib import Path
-
-            path = Path(transcript_path)
-            if not path.exists():
-                logger.warning("Transcript file not found", path=transcript_path)
-                return None
-
-            # Read the transcript file to get recent context
-            recent_messages = []
-
-            with open(path) as f:
-                for line_num, line in enumerate(f, 1):
-                    try:
-                        message = json.loads(line.strip())
-                        recent_messages.append(message)
-                    except json.JSONDecodeError:
-                        logger.debug(
-                            "Skipping invalid JSON line in transcript",
-                            line_number=line_num,
-                            transcript_path=transcript_path,
-                        )
-                        continue
-
-            logger.info(
-                "Transcript parsing completed",
-                transcript_path=transcript_path,
-                total_messages=len(recent_messages),
-                searching_last_messages=min(20, len(recent_messages)),
-            )
-
-            # Look for the most recent assistant message that might contain the permission request context
-            # Permission requests usually come after Claude tries to use a tool
-            context_info = {
-                "tool_use": None,
-                "code_snippet": None,
-                "new_code": None,
-                "file_path": None,
-            }
-
-            # Check last few messages for context
-            messages_to_search = recent_messages[
-                -20:
-            ]  # Last 20 messages (extended search)
-            logger.info(
-                "Starting context extraction",
-                messages_to_check=len(messages_to_search),
-                transcript_path=transcript_path,
-            )
-
-            for msg_idx, msg in enumerate(reversed(messages_to_search)):
-                # Get the message content - it's nested in msg.message.content
-                message_data = msg.get("message", {})
-                content = message_data.get("content", "")
-                msg_type = msg.get("type", "unknown")
-
-                # Log the message structure for debugging
-                logger.debug(
-                    "Checking message for context",
-                    message_index=msg_idx,
-                    message_type=msg_type,
-                    content_type=type(content).__name__,
-                    content_preview=str(content)[:100] if content else "empty",
-                    has_content_list=isinstance(content, list),
-                    content_length=len(content) if isinstance(content, list) else 0,
-                )
-
-                if isinstance(content, list):
-                    # Handle structured content
-                    logger.debug(
-                        "Processing structured content list",
-                        content_items=len(content),
-                        message_index=msg_idx,
-                    )
-
-                    for item_idx, item in enumerate(content):
-                        if isinstance(item, dict):
-                            item_type = item.get("type", "")
-                            logger.debug(
-                                "Processing content item",
-                                item_index=item_idx,
-                                item_type=item_type,
-                                item_keys=list(item.keys()),
-                            )
-
-                            if item.get("type") == "tool_use":
-                                tool_name = item.get("name", "")
-                                tool_input = item.get("input", {})
-
-                                logger.info(
-                                    "Found tool_use in transcript",
-                                    message_index=msg_idx,
-                                    item_index=item_idx,
-                                    tool_name=tool_name,
-                                    tool_input_keys=list(tool_input.keys()),
-                                    tool_input=tool_input,  # Log complete input for debugging
-                                )
-
-                                # Extract relevant context based on tool type
-                                if tool_name in ["Edit", "MultiEdit", "Write"]:
-                                    context_info["tool_use"] = tool_name
-                                    context_info["file_path"] = tool_input.get(
-                                        "file_path", ""
-                                    )
-
-                                    if tool_name == "Edit":
-                                        context_info["code_snippet"] = tool_input.get(
-                                            "old_string", ""
-                                        )
-                                        context_info["new_code"] = tool_input.get(
-                                            "new_string", ""
-                                        )
-                                    elif tool_name == "MultiEdit":
-                                        # MultiEdit has edits array with multiple old_string/new_string pairs
-                                        edits = tool_input.get("edits", [])
-                                        if edits:
-                                            # For permission dialog, show summary of first edit as preview
-                                            first_edit = edits[0]
-                                            context_info["code_snippet"] = (
-                                                first_edit.get("old_string", "")
-                                            )
-                                            context_info["new_code"] = first_edit.get(
-                                                "new_string", ""
-                                            )
-                                            # Store edit count for permission dialog formatting
-                                            context_info["edit_count"] = len(edits)
-                                            logger.info(
-                                                "MultiEdit transcript context extracted",
-                                                message_index=msg_idx,
-                                                edit_count=len(edits),
-                                                first_edit_preview=str(
-                                                    first_edit.get("old_string", "")
-                                                )[:100],
-                                            )
-                                        else:
-                                            context_info["code_snippet"] = None
-                                            context_info["new_code"] = None
-                                            context_info["edit_count"] = 0
-                                    elif tool_name == "Write":
-                                        content = tool_input.get("content", "")
-                                        context_info["code_snippet"] = (
-                                            content  # Full content, no truncation
-                                        )
-                                        context_info["new_code"] = (
-                                            None  # Write doesn't have old/new, just content
-                                        )
-
-                                    logger.info(
-                                        "Context extraction successful",
-                                        tool_name=tool_name,
-                                        file_path=context_info.get("file_path"),
-                                        has_code_snippet=bool(
-                                            context_info.get("code_snippet")
-                                        ),
-                                        context_info=context_info,
-                                    )
-                                    return context_info  # Found relevant context
-
-                                elif tool_name == "Bash":
-                                    context_info["tool_use"] = tool_name
-                                    context_info["code_snippet"] = tool_input.get(
-                                        "command", ""
-                                    )
-                                    logger.info(
-                                        "Context extraction successful (Bash)",
-                                        tool_name=tool_name,
-                                        command=context_info.get("code_snippet"),
-                                        context_info=context_info,
-                                    )
-                                    return context_info
-
-                                elif tool_name == "ExitPlanMode":
-                                    context_info["tool_use"] = tool_name
-                                    plan_content = tool_input.get("plan", "")
-                                    context_info["plan"] = plan_content
-                                    context_info["code_snippet"] = (
-                                        plan_content  # Also store in code_snippet for compatibility
-                                    )
-                                    logger.info(
-                                        "Context extraction successful (ExitPlanMode)",
-                                        tool_name=tool_name,
-                                        plan_length=len(plan_content),
-                                        context_info=context_info,
-                                    )
-                                    return context_info
-
-                elif isinstance(content, str):
-                    # Sometimes content might be a string with tool information
-                    if "tool_use" in content.lower():
-                        logger.debug(
-                            "Found string content with tool_use",
-                            content_preview=content[:200],
-                        )
-
-            # Log final result
-            if context_info["tool_use"]:
-                logger.info(
-                    "Context extraction completed successfully",
-                    context_info=context_info,
-                )
-                return context_info
-            else:
-                logger.warning(
-                    "Context extraction failed - no tool_use found in transcript",
-                    transcript_path=transcript_path,
-                    messages_searched=len(messages_to_search),
-                    total_messages=len(recent_messages),
-                )
-                return None
-
-        except Exception as e:
-            logger.error(
-                "Error getting permission context from transcript", error=str(e)
-            )
-            return None
 
     async def stop(self):
         """Stop the server and cleanup."""

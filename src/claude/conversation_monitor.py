@@ -373,6 +373,9 @@ class ConversationMonitor:
         elif tool_use == "ExitPlanMode":
             code_snippet = tool_input.get("plan", "")
             new_code = ""  # Plan doesn't have new content
+        elif tool_use == "Read":
+            code_snippet = ""  # Read doesn't have code to show
+            new_code = ""
         else:
             # Generic fallback - try to find any content
             code_snippet = (
@@ -470,6 +473,37 @@ class ConversationMonitor:
                 question = f"📋 **Plan Ready**\n\n{plan_content}\n\n**How would you like to proceed?**"
             else:
                 question = "📋 **Plan Ready**\n\nClaude has finished planning and is ready to proceed.\n\n**How would you like to proceed?**"
+
+        elif tool_use == "Read":
+            # Read tool - show file to be read with range info
+            question = f"🔐 **Permission Required**\n\n{base_message}"
+            if file_path:
+                question += f"\n\n📂 **File to read:** `{file_path}`"
+
+                # Add range information if offset/limit are specified
+                offset = tool_input.get("offset")
+                limit = tool_input.get("limit")
+
+                # Safely convert to int if needed
+                try:
+                    if offset is not None:
+                        offset = int(offset)
+                    if limit is not None:
+                        limit = int(limit)
+
+                    if offset is not None or limit is not None:
+                        if offset is not None and limit is not None:
+                            end_line = (
+                                offset + limit - 1
+                            )  # -1 because limit is inclusive
+                            question += f"\n📍 **Range:** Lines {offset}-{end_line}"
+                        elif offset is not None:
+                            question += f"\n📍 **Starting from:** Line {offset}"
+                        elif limit is not None:
+                            question += f"\n📍 **Limit:** First {limit} lines"
+                except (ValueError, TypeError):
+                    # If conversion fails, just skip the range info
+                    pass
 
         else:
             # Generic tool or unknown
@@ -702,7 +736,7 @@ class ConversationMonitor:
                 if offset is not None or limit is not None:
                     start = offset or 0
                     if limit is not None:
-                        end = start + limit
+                        end = start + limit - 1  # -1 because limit is inclusive
                         range_text = f" (lines {start}-{end})"
                     else:
                         range_text = f" (from line {start})"
