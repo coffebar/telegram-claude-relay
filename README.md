@@ -9,6 +9,10 @@ A Telegram bot that acts as a relay between Telegram and Claude Code running in 
 - Track Claude activity (including thinking steps) via hooks
 - Returns Claude's responses back to Telegram
 
+## Screenshot
+
+![Telegram Bot Interface](Screenshot_Telegram.png)
+
 ## Setup
 
 ### Prerequisites
