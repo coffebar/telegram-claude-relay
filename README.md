@@ -8,6 +8,7 @@ A Telegram bot that acts as a relay between Telegram and Claude Code running in 
 - Forwards them to Claude Code in a tmux pane
 - Track Claude activity (including thinking steps) via hooks
 - Returns Claude's responses back to Telegram
+- Parse Claude's permissions options and send them as inline keyboard buttons
 
 ## Screenshot
 
@@ -122,6 +123,8 @@ make help        # Show available commands
 5. You see Claude's responses and tool usage in real-time
 
 The bot now includes comprehensive tool transparency with specific formatting for each Claude tool (Bash, Edit, Read, Write, etc.), making it easy to see exactly what Claude is doing at each step.
+
+**Note:** You can interact with the same Claude session from anywhere - directly in tmux locally, via SSH from another machine, or through this Telegram bot.
 
 ### Claude Code Hooks Integration
 
