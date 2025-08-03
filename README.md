@@ -169,22 +169,22 @@ tmux send-keys -t claude-session "claude" Enter
 
 - [ ] Disable logging when not debugging
 - [ ] Cache target pane discovery to reduce permission dialog latency
-- [ ] /clear command to menu
+- [ ] Consider add more hooks
 
 ### Tool Usage Transparency
 
-- [x] **Evidence-Based Tool Messages**: Scientific approach to tool transparency
-  - ✅ **Bash**: `💻 **Bash:** docker ps - Show running Docker containers`
-  - ✅ **LS**: `📂 **Listing:** /path/to/directory`
-  - ✅ **Edit**: `✏️ **Editing:** /path/to/file - replacing: old text...`
-  - ✅ **TodoWrite**: `📝 **Managing todos:** 4 items`
-  - ✅ **Read**: `📖 **Reading:** /path/to/file (lines 0-20)`
-  - ✅ **Write**: `✍️ **Writing:** /path/to/file (1234 chars)`
-  - ✅ **Grep**: `🔍 **Searching:** pattern in /path (content)`
-  - ✅ **Glob**: `🗂️ **Finding files:** *.py`
-  - ✅ **MultiEdit**: `✏️ **Multi-editing:** /path/to/file (3 changes)`
-  - ✅ **WebSearch**: `🌐 **Web Search:** search terms`
-  - 🔧 **Unknown tools**: Generic display until verified
+- **Evidence-Based Tool Messages**: Scientific approach to tool transparency
+  - **Bash**: `💻 **Bash:** docker ps - Show running Docker containers`
+  - **LS**: `📂 **Listing:** /path/to/directory`
+  - **Edit**: `✏️ **Editing:** /path/to/file - replacing: old text...`
+  - **TodoWrite**: `📝 **Managing todos:** 4 items`
+  - **Read**: `📖 **Reading:** /path/to/file (lines 0-20)`
+  - **Write**: `✍️ **Writing:** /path/to/file (1234 chars)`
+  - **Grep**: `🔍 **Searching:** pattern in /path (content)`
+  - **Glob**: `🗂️ **Finding files:** *.py`
+  - **MultiEdit**: `✏️ **Multi-editing:** /path/to/file (3 changes)`
+  - **WebSearch**: `🌐 **Web Search:** search terms`
+  - **Unknown tools**: Generic display until verified
 - [ ] **Adding New Tools (Future)**: How to add support for new tools
   1. **Trigger the tool** - Use Claude Code to execute the new tool
   2. **Check logs** - Look for `tool_input_full` in `telegram-claude-bot.log`
