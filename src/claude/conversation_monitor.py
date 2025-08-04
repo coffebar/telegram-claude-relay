@@ -858,10 +858,9 @@ class ConversationMonitor:
                 message = f"🤖 **Starting Task:** {description}"
                 if subagent_type:
                     message += f"\n**Agent:** {subagent_type}"
-                if prompt and len(prompt) <= 200:
+                if prompt:
+                    # Always show full prompt for Task tools - users want complete context
                     message += f"\n**Prompt:** {prompt}"
-                elif prompt:
-                    message += f"\n**Prompt:** {prompt[:200]}..."
                 return message
 
             elif tool_name == "WebFetch":
