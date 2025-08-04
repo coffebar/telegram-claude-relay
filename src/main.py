@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import atexit
 import logging
 import signal
 import sys
@@ -146,6 +147,22 @@ async def run_application(app: Dict[str, Any]) -> None:
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGHUP, signal_handler)  # Handle terminal hangup
+
+    # Initialize socket server reference for cleanup
+    socket_server = None
+    socket_path = Path.cwd() / "telegram-relay.sock"
+
+    # Register cleanup function for socket file
+    def cleanup_socket():
+        if socket_path.exists():
+            try:
+                socket_path.unlink()
+                logger.info("Cleaned up socket file via atexit")
+            except Exception as e:
+                logger.error("Failed to cleanup socket file", error=str(e))
+
+    atexit.register(cleanup_socket)
 
     try:
         # Start the bot
@@ -226,6 +243,12 @@ async def run_application(app: Dict[str, Any]) -> None:
         try:
             await bot.stop()
             await claude_integration.shutdown()
+
+            # Clean up socket server
+            if socket_server:
+                logger.info("Stopping Unix socket server")
+                await socket_server.stop()
+
         except Exception as e:
             logger.error("Error during shutdown", error=str(e))
 
