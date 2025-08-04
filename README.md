@@ -28,6 +28,7 @@ A Telegram bot that acts as a relay between Telegram and Claude Code running in 
 2. Send `/newbot` and follow the prompts
 3. Save your bot token (looks like: `1234567890:ABCdefGHIjklMNOpqrsTUVwxyz`)
 4. Get your Telegram user ID (message [@userinfobot](https://t.me/userinfobot))
+5. Optional: use `/setuserpic` command in @BotFather and upload `BotAvatar.svg` as a photo.
 
 ### 2. Installation
 
