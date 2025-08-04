@@ -172,7 +172,17 @@ class UnixSocketServer:
                 os.path.expanduser(self.target_cwd)
             )
 
-            if hook_cwd_normalized != target_cwd_normalized:
+            # Note: Claude may use cd commands, so it will change CWD during execution.
+            # Check if hook_cwd is the target_cwd or a subdirectory of it
+            try:
+                # Convert to Path objects for easier comparison
+                hook_path = Path(hook_cwd_normalized).resolve()
+                target_path = Path(target_cwd_normalized).resolve()
+
+                # Check if hook_path is relative to target_path (is subdirectory or same)
+                hook_path.relative_to(target_path)
+            except ValueError:
+                # relative_to raises ValueError if hook_path is not under target_path
                 logger.info(
                     "Ignoring hook from different CWD",
                     hook_type=hook_type,
