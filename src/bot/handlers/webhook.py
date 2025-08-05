@@ -817,6 +817,79 @@ class ConversationWebhookHandler:
             "sent_parts": len(sent_messages),
         }
 
+    async def _send_permission_message_series(
+        self,
+        user_id: int,
+        message: str,
+        reply_markup=None,
+        parse_mode=ParseMode.MARKDOWN_V2,
+    ) -> dict:
+        """Send a permission message as a series if it's too long, with keyboard on the last message."""
+        # Sanitize message for Telegram Markdown parsing
+        sanitized_message = self._sanitize_markdown(message)
+
+        # Split message if needed
+        message_parts = self._split_long_message(sanitized_message)
+
+        sent_messages = []
+        for i, part in enumerate(message_parts):
+            try:
+                # Only add keyboard to the last message
+                keyboard = reply_markup if (i == len(message_parts) - 1) else None
+
+                sent_msg = await self.message_sender.send_message(
+                    chat_id=user_id,
+                    text=part,
+                    parse_mode=parse_mode,
+                    reply_markup=keyboard,
+                )
+                sent_messages.append(
+                    {
+                        "message_id": sent_msg.message_id,
+                        "content": part,
+                        "part_number": i + 1,
+                        "total_parts": len(message_parts),
+                        "has_keyboard": keyboard is not None,
+                    }
+                )
+
+                # Small delay between messages to avoid rate limiting
+                if i < len(message_parts) - 1:
+                    import asyncio
+
+                    await asyncio.sleep(0.1)
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to send permission message part {i+1}/{len(message_parts)}",
+                    error=str(e),
+                )
+                # If sending fails, return info about the last successful message
+                break
+
+        if not sent_messages:
+            raise Exception("Failed to send any permission message parts")
+
+        # Return info about the series, focusing on the last message (with keyboard)
+        last_message = sent_messages[-1]
+
+        logger.info(
+            "Sent permission message series",
+            user_id=user_id,
+            total_parts=len(message_parts),
+            sent_parts=len(sent_messages),
+            last_message_id=last_message["message_id"],
+            keyboard_on_last=last_message["has_keyboard"],
+        )
+
+        return {
+            "last_message_id": last_message["message_id"],
+            "last_content": last_message["content"],
+            "message_series": sent_messages,
+            "total_parts": len(message_parts),
+            "sent_parts": len(sent_messages),
+        }
+
     async def _send_new_message(
         self, user_id: int, message: str, message_type: str
     ) -> None:
@@ -882,10 +955,8 @@ class ConversationWebhookHandler:
 
             for user_id in users_to_notify:
                 try:
-                    await self.message_sender.send_message(
-                        chat_id=user_id,
-                        text=formatted_message,
-                        parse_mode=ParseMode.MARKDOWN_V2,
+                    await self._send_permission_message_series(
+                        user_id, formatted_message, reply_markup=None
                     )
                     logger.info(
                         "Sent parsing failure message to user",
@@ -926,11 +997,8 @@ class ConversationWebhookHandler:
 
         for user_id in users_to_notify:
             try:
-                await self.message_sender.send_message(
-                    chat_id=user_id,
-                    text=formatted_message,
-                    parse_mode=ParseMode.MARKDOWN_V2,
-                    reply_markup=reply_markup,
+                await self._send_permission_message_series(
+                    user_id, formatted_message, reply_markup
                 )
                 logger.info(
                     "Sent permission dialog to user",
@@ -1105,7 +1173,7 @@ class ConversationWebhookHandler:
 
         # Notify users that they are subscribed
         notification_message = (
-            "🔔 **Hook Monitoring Enabled**\n\n"
+            "🚀 **Bot Started**\n\n"
             "You are now subscribed to receive Claude conversation updates.\n"
             "You'll receive notifications when Claude uses tools or performs actions."
         )
