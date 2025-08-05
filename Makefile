@@ -1,4 +1,4 @@
-.PHONY: setup run clean help format lint format-check install-hooks uninstall-hooks setup-full status logs update-tool-schemas
+.PHONY: setup run stop restart clean self-update help format lint format-check install-hooks uninstall-hooks setup-full status logs update-tool-schemas
 
 # Default target
 help:
@@ -7,6 +7,8 @@ help:
 	@echo "Quick Start:"
 	@echo "  make setup-full    - Complete setup (venv + dependencies + hooks)"
 	@echo "  make run           - Run the bot"
+	@echo "  make stop          - Stop the bot gracefully"
+	@echo "  make restart       - Trigger bot restart in same terminal (via SIGUSR1)"
 	@echo ""
 	@echo "Development:"
 	@echo "  make format        - Format all Python files with black and isort"
@@ -16,6 +18,7 @@ help:
 	@echo "Management:"
 	@echo "  make status        - Check tmux session, hooks, and bot status"
 	@echo "  make logs          - Tail bot logs with live updates"
+	@echo "  make self-update   - Update the app from GitHub (git pull --rebase --autostash)"
 	@echo "  make install-hooks - Install Claude Code hooks"
 	@echo "  make uninstall-hooks - Uninstall Claude Code hooks"
 	@echo "  make update-tool-schemas - Update tool schemas documentation from Claude JSONL files"
@@ -32,10 +35,71 @@ setup:
 run:
 	@./run.sh
 
+stop:
+	@if [ -e "telegram-relay.sock" ]; then \
+		echo "Stopping bot..."; \
+		PID=$$(lsof -t telegram-relay.sock 2>/dev/null | head -1); \
+		if [ -n "$$PID" ]; then \
+			kill -TERM $$PID; \
+			echo "✅ Sent shutdown signal to bot (PID: $$PID)"; \
+			echo "   Waiting for graceful shutdown..."; \
+		else \
+			echo "⚠️  Socket file exists but no process found"; \
+			echo "   Trying alternative method..."; \
+			PID=$$(ps aux | grep "[p]ython src/main.py" | awk '{print $$2}'); \
+			if [ -n "$$PID" ]; then \
+				kill -TERM $$PID; \
+				echo "✅ Sent shutdown signal to bot (PID: $$PID)"; \
+			else \
+				echo "❌ Could not find bot process"; \
+				echo "   Manual cleanup: rm -f telegram-relay.sock"; \
+			fi; \
+		fi; \
+	else \
+		echo "ℹ️  Bot is not running"; \
+	fi
+
+restart:
+	@if [ -e "telegram-relay.sock" ]; then \
+		echo "🔄 Triggering bot restart..."; \
+		PID=$$(lsof -t telegram-relay.sock 2>/dev/null | head -1); \
+		if [ -n "$$PID" ]; then \
+			echo "📤 Sending restart signal to bot (PID: $$PID)"; \
+			echo "   The bot will:"; \
+			echo "   1. Exit with code 42"; \
+			echo "   2. Pull latest changes from GitHub"; \
+			echo "   3. Restart automatically in the same terminal"; \
+			kill -USR1 $$PID 2>/dev/null || kill -TERM $$PID; \
+			echo "✅ Restart signal sent"; \
+			echo "   Check the bot's terminal for progress"; \
+		else \
+			echo "⚠️  Socket file exists but no process found"; \
+			echo "   Use 'make run' to start the bot"; \
+		fi; \
+	else \
+		echo "ℹ️  Bot is not running"; \
+		echo "   Use 'make run' to start the bot"; \
+	fi
+
 clean:
 	@echo "Cleaning up..."
 	@rm -rf venv
 	@echo "✅ Virtual environment removed"
+
+self-update:
+	@echo "Updating from GitHub..."
+	@git pull --rebase --autostash
+	@echo "✅ Repository updated"
+	@echo ""
+	@if [ -e "telegram-relay.sock" ]; then \
+		echo "⚠️  Bot is currently running."; \
+		echo "   To apply changes, restart the bot:"; \
+		echo "   - Stop: Ctrl+C or 'make stop'"; \
+		echo "   - Start: 'make run'"; \
+		echo "   Or use: 'make restart' for automatic restart"; \
+	else \
+		echo "ℹ️  Bot is not running. Start it with 'make run'"; \
+	fi
 
 format:
 	@echo "Formatting Python files..."
