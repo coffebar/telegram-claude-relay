@@ -116,6 +116,7 @@ class ClaudeTelegramBot:
         commands = [
             BotCommand("clear", "Clear Claude's conversation history"),
             BotCommand("compact", "Compact Claude's conversation"),
+            BotCommand("self_update", "Update bot from GitHub and restart"),
         ]
 
         # Add discovered commands if available
@@ -153,6 +154,7 @@ class ClaudeTelegramBot:
             ("start", command.start_command),
             ("clear", command.clear_command),
             ("compact", command.compact_command),
+            ("self_update", command.self_update_command),
         ]
 
         for cmd, handler in handlers:
@@ -301,6 +303,9 @@ class ClaudeTelegramBot:
             "Starting bot", mode="webhook" if self.settings.webhook_url else "polling"
         )
 
+        # Check git status and notify users on startup
+        asyncio.create_task(self._check_git_updates_on_startup())
+
         try:
             self.is_running = True
 
@@ -444,3 +449,162 @@ class ClaudeTelegramBot:
         except Exception as e:
             logger.error("Health check failed", error=str(e))
             return False
+
+    async def _check_git_updates_on_startup(self) -> None:
+        """Check git status and notify users about available updates."""
+        import subprocess
+
+        # Wait for bot to be fully initialized
+        await asyncio.sleep(2)
+
+        try:
+            logger.info("Checking git status for updates")
+
+            # Fetch latest changes from remote without merging
+            subprocess.run(["git", "fetch"], capture_output=True, text=True, check=True)
+
+            # Get current branch
+            current_branch_result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            current_branch = current_branch_result.stdout.strip()
+
+            # Check for unstaged changes
+            status_result = subprocess.run(
+                ["git", "status", "--porcelain"], capture_output=True, text=True
+            )
+            has_unstaged_changes = (
+                bool(status_result.stdout.strip())
+                if status_result.returncode == 0
+                else False
+            )
+
+            # Get commit counts
+            behind_result = subprocess.run(
+                ["git", "rev-list", "--count", f"HEAD..origin/{current_branch}"],
+                capture_output=True,
+                text=True,
+            )
+            behind_count = (
+                int(behind_result.stdout.strip())
+                if behind_result.returncode == 0
+                else 0
+            )
+
+            ahead_result = subprocess.run(
+                ["git", "rev-list", "--count", f"origin/{current_branch}..HEAD"],
+                capture_output=True,
+                text=True,
+            )
+            ahead_count = (
+                int(ahead_result.stdout.strip()) if ahead_result.returncode == 0 else 0
+            )
+
+            # Only send message if there's something actionable
+            message = None
+
+            if behind_count > 0 and ahead_count == 0:
+                # Get latest commit info for updates
+                log_result = subprocess.run(
+                    ["git", "log", f"HEAD..origin/{current_branch}", "--oneline", "-5"],
+                    capture_output=True,
+                    text=True,
+                )
+                latest_commit_info = ""
+                if log_result.returncode == 0 and log_result.stdout:
+                    latest_commit_info = f"\n\n**Recent commits:**\n```\n{log_result.stdout.strip()}\n```"
+
+                message = (
+                    f"📥 **Update Available!**\n\n"
+                    f"The bot is {behind_count} commit{'s' if behind_count != 1 else ''} behind origin/{current_branch}.\n"
+                    f"Run `/self_update` to update the bot and get the latest features.{latest_commit_info}"
+                )
+            elif behind_count == 0 and ahead_count > 0:
+                message = (
+                    f"📤 Bot is {ahead_count} commit{'s' if ahead_count != 1 else ''} ahead of origin/{current_branch}.\n"
+                    f"Consider pushing your changes."
+                )
+            elif behind_count > 0 and ahead_count > 0:
+                # Get latest commit info for mixed status
+                log_result = subprocess.run(
+                    ["git", "log", f"HEAD..origin/{current_branch}", "--oneline", "-5"],
+                    capture_output=True,
+                    text=True,
+                )
+                latest_commit_info = ""
+                if log_result.returncode == 0 and log_result.stdout:
+                    latest_commit_info = f"\n\n**Recent commits:**\n```\n{log_result.stdout.strip()}\n```"
+
+                message = (
+                    f"🔄 **Repository Status:**\n"
+                    f"• {behind_count} commit{'s' if behind_count != 1 else ''} behind origin/{current_branch}\n"
+                    f"• {ahead_count} commit{'s' if ahead_count != 1 else ''} ahead of origin/{current_branch}\n\n"
+                    f"Run `/self_update` to sync with the remote repository.{latest_commit_info}"
+                )
+            elif has_unstaged_changes:
+                message = (
+                    "📝 **Uncommitted Changes Detected**\n\n"
+                    "The bot has uncommitted changes in the working directory.\n"
+                    "Consider committing or stashing changes before running `/self_update`."
+                )
+
+            # Only send notification if there's an actionable message
+            if message:
+                for user_id in self.settings.allowed_users:
+                    try:
+                        await self.app.bot.send_message(
+                            chat_id=user_id, text=message, parse_mode="Markdown"
+                        )
+                        logger.info("Sent startup notification", user_id=user_id)
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to send startup notification",
+                            user_id=user_id,
+                            error=str(e),
+                        )
+            else:
+                logger.info("Bot is up to date, no startup notification needed")
+
+        except subprocess.CalledProcessError as e:
+            logger.error("Git command failed", error=str(e), stderr=e.stderr)
+            # Send error notification
+            error_message = (
+                f"⚠️ **Git Status Check Failed**\n\n"
+                f"Unable to check for updates. Git command failed.\n"
+                f"Error: `{str(e)}`"
+            )
+            for user_id in self.settings.allowed_users:
+                try:
+                    await self.app.bot.send_message(
+                        chat_id=user_id, text=error_message, parse_mode="Markdown"
+                    )
+                    logger.info("Sent git error notification", user_id=user_id)
+                except Exception as send_error:
+                    logger.warning(
+                        "Failed to send git error notification",
+                        user_id=user_id,
+                        error=str(send_error),
+                    )
+        except Exception as e:
+            logger.error("Failed to check git updates", error=str(e))
+            # Send general error notification
+            error_message = (
+                f"⚠️ **Update Check Failed**\n\n"
+                f"Unable to check for updates due to an unexpected error.\n"
+                f"Error: `{str(e)}`"
+            )
+            for user_id in self.settings.allowed_users:
+                try:
+                    await self.app.bot.send_message(
+                        chat_id=user_id, text=error_message, parse_mode="Markdown"
+                    )
+                    logger.info("Sent general error notification", user_id=user_id)
+                except Exception as send_error:
+                    logger.warning(
+                        "Failed to send general error notification",
+                        user_id=user_id,
+                        error=str(send_error),
+                    )

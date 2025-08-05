@@ -82,3 +82,26 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /compact command - forwards to Claude."""
     await _forward_claude_command(update, context, "/compact")
+
+
+async def self_update_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Handle /self_update command - updates bot from GitHub and restarts."""
+    user = update.effective_user
+
+    # Send initial message
+    await update.message.reply_text(
+        "🔄 Self-update initiated...\n"
+        "The bot will:\n"
+        "1. Pull latest changes from GitHub\n"
+        "2. Restart automatically\n"
+        "3. Be back online in a few seconds"
+    )
+
+    logger.info("Self-update command executed", user_id=user.id)
+
+    # Exit with code 42 to trigger update in wrapper script
+    import sys
+
+    sys.exit(42)

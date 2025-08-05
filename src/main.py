@@ -131,8 +131,12 @@ async def create_application(config: Settings) -> Dict[str, Any]:
     }
 
 
-async def run_application(app: Dict[str, Any]) -> None:
-    """Run the application with graceful shutdown handling."""
+async def run_application(app: Dict[str, Any]) -> int:
+    """Run the application with graceful shutdown handling.
+
+    Returns:
+        Exit code: 0 for normal exit, 42 for restart request
+    """
     logger = structlog.get_logger()
     bot: ClaudeTelegramBot = app["bot"]
     claude_integration: ClaudeIntegration = app["claude_integration"]
@@ -140,14 +144,22 @@ async def run_application(app: Dict[str, Any]) -> None:
 
     # Set up signal handlers for graceful shutdown
     shutdown_event = asyncio.Event()
+    restart_requested = False
 
     def signal_handler(signum, frame):
         logger.info("Shutdown signal received", signal=signum)
         shutdown_event.set()
 
+    def restart_handler(signum, frame):
+        nonlocal restart_requested
+        logger.info("Restart signal received (SIGUSR1), requesting restart")
+        restart_requested = True
+        shutdown_event.set()
+
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGHUP, signal_handler)  # Handle terminal hangup
+    signal.signal(signal.SIGUSR1, restart_handler)  # Handle restart request
 
     # Initialize socket server reference for cleanup
     socket_server = None
@@ -254,6 +266,12 @@ async def run_application(app: Dict[str, Any]) -> None:
 
         logger.info("Application shutdown complete")
 
+    # Return exit code based on restart request
+    if restart_requested:
+        logger.info("Returning exit code 42 for restart")
+        return 42
+    return 0
+
 
 async def main() -> None:
     """Main application entry point."""
@@ -285,7 +303,11 @@ async def main() -> None:
 
         # Initialize bot and Claude integration
         app = await create_application(config)
-        await run_application(app)
+        exit_code = await run_application(app)
+
+        # Exit with the appropriate code
+        if exit_code != 0:
+            sys.exit(exit_code)
 
     except ConfigurationError as e:
         logger.error("Configuration error", error=str(e))
