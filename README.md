@@ -74,9 +74,15 @@ make run
 
 The bot uses Claude Code hooks to provide real-time tool notifications and live-updating status messages.
 
+### Bot Commands
+
+- `/start` - Show welcome message
+- `/self_update` - Update bot from GitHub and restart automatically
+- Any other text - Sent directly to Claude (including `/clear`, `/compact`, etc.)
+
 ## Features
 
-- **Real-time Tool Transparency**: See exactly what Claude is doing with full code display
+- **Real-time Tool Transparency**: See exactly what Claude is doing with full code display (including subagent communications)
 - **Interactive Permission Handling**: Approve/deny Claude's actions with inline keyboard buttons
 - **Live Status Updates**: Watch Claude's thinking process and tool usage in real-time
 - **Hook-based Integration**: Deep integration with Claude Code via Unix socket communication
@@ -88,6 +94,7 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 - **Diff Formatting**: Code edits displayed in unified diff format for easy review
 - **CWD-based Hook Filtering**: Only processes hooks from Claude instance in the tmux session
 - **Smart Format Conversion**: Automatically converts Claude's standard markdown to Telegram-compatible format by using `telegramify-markdown`
+- **Self-Update Capability**: Easily update the bot code from GitHub with `/self_update` command
 
 ## Configuration
 
@@ -102,7 +109,10 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 ```bash
 make setup       # Create venv and install dependencies
 make run         # Run the bot
+make stop        # Stop the bot gracefully
+make restart     # Trigger bot restart in same terminal (sends SIGUSR1)
 make clean       # Remove venv
+make self-update # Update the app from GitHub (git pull --rebase --autostash)
 make format      # Format all Python files with black and isort
 make lint        # Run linting checks with ruff
 make format-check# Check if files are properly formatted
