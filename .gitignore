@@ -130,6 +130,7 @@ data/
 *.db
 *.db-journal
 *.log
+*.log.*
 .DS_Store
 
 # IDE
