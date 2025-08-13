@@ -194,11 +194,7 @@ tmux send-keys -t claude-session "claude" Enter
 
 ## TODO
 
-### Core Improvements
-
-- [ ] Disable logging when not debugging
 - [ ] Cache target pane discovery to reduce permission dialog latency
-- [ ] Consider add more hooks
 
 ### Tool Usage Transparency
 

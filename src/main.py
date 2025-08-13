@@ -25,7 +25,8 @@ def setup_logging(
     debug: bool = False, log_file: str = "telegram-claude-bot.log"
 ) -> None:
     """Configure structured logging with both console and file output."""
-    level = logging.DEBUG if debug else logging.INFO
+    # Use WARNING level when not debugging to minimize logging
+    level = logging.DEBUG if debug else logging.WARNING
 
     # Configure standard logging with both console and file handlers
     root_logger = logging.getLogger()
@@ -34,47 +35,67 @@ def setup_logging(
     # Clear existing handlers
     root_logger.handlers = []
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(level)
-    console_handler.setFormatter(logging.Formatter("%(message)s"))
-    root_logger.addHandler(console_handler)
+    # Only add handlers when debugging
+    if debug:
+        # Console handler
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(logging.Formatter("%(message)s"))
+        root_logger.addHandler(console_handler)
 
-    # File handler with rotation
-    from logging.handlers import RotatingFileHandler
+        # File handler with rotation
+        from logging.handlers import RotatingFileHandler
 
-    file_handler = RotatingFileHandler(
-        filename=log_file,
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=5,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(level)
-    file_handler.setFormatter(logging.Formatter("%(message)s"))
-    root_logger.addHandler(file_handler)
+        file_handler = RotatingFileHandler(
+            filename=log_file,
+            maxBytes=10 * 1024 * 1024,  # 10MB
+            backupCount=5,
+            encoding="utf-8",
+        )
+        file_handler.setLevel(level)
+        file_handler.setFormatter(logging.Formatter("%(message)s"))
+        root_logger.addHandler(file_handler)
+    else:
+        # Minimal console handler for critical errors only
+        console_handler = logging.StreamHandler(sys.stderr)
+        console_handler.setLevel(logging.ERROR)
+        console_handler.setFormatter(logging.Formatter("%(levelname)s: %(message)s"))
+        root_logger.addHandler(console_handler)
 
     # Configure structlog
-    structlog.configure(
-        processors=[
-            structlog.stdlib.filter_by_level,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            (
-                structlog.processors.JSONRenderer()
-                if not debug
-                else structlog.dev.ConsoleRenderer()
-            ),
-        ],
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        wrapper_class=structlog.stdlib.BoundLogger,
-        cache_logger_on_first_use=True,
-    )
+    if debug:
+        # Full structured logging with console renderer when debugging
+        structlog.configure(
+            processors=[
+                structlog.stdlib.filter_by_level,
+                structlog.stdlib.add_logger_name,
+                structlog.stdlib.add_log_level,
+                structlog.stdlib.PositionalArgumentsFormatter(),
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.StackInfoRenderer(),
+                structlog.processors.format_exc_info,
+                structlog.processors.UnicodeDecoder(),
+                structlog.dev.ConsoleRenderer(),
+            ],
+            context_class=dict,
+            logger_factory=structlog.stdlib.LoggerFactory(),
+            wrapper_class=structlog.stdlib.BoundLogger,
+            cache_logger_on_first_use=True,
+        )
+    else:
+        # Minimal structlog configuration for production
+        structlog.configure(
+            processors=[
+                structlog.stdlib.filter_by_level,
+                structlog.processors.format_exc_info,
+                structlog.processors.UnicodeDecoder(),
+                structlog.processors.JSONRenderer(),
+            ],
+            context_class=dict,
+            logger_factory=structlog.stdlib.LoggerFactory(),
+            wrapper_class=structlog.stdlib.BoundLogger,
+            cache_logger_on_first_use=True,
+        )
 
 
 def parse_args() -> argparse.Namespace:
