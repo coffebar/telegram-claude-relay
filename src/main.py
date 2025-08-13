@@ -163,7 +163,27 @@ async def run_application(app: Dict[str, Any]) -> int:
 
     # Initialize socket server reference for cleanup
     socket_server = None
-    socket_path = Path.cwd() / "telegram-relay.sock"
+    
+    # Get project CWD and generate socket name based on project
+    project_cwd = None
+    project_name = None
+    if claude_integration and hasattr(claude_integration, 'tmux_integration'):
+        await claude_integration._ensure_tmux_integration()
+        if claude_integration.tmux_integration and hasattr(claude_integration.tmux_integration, 'tmux_client'):
+            try:
+                project_cwd = await claude_integration.tmux_integration.tmux_client.get_pane_cwd()
+                # Extract project name from CWD (last directory component)
+                project_name = Path(project_cwd).name
+                # Update socket path to use project name
+                config.socket_path = f"telegram-relay-{project_name}.sock"
+                logger.info("Generated project-based socket name", 
+                           cwd=project_cwd, 
+                           project=project_name, 
+                           socket=config.socket_path)
+            except Exception as e:
+                logger.warning("Could not get project CWD, using default socket", error=str(e))
+    
+    socket_path = Path.cwd() / config.socket_path
 
     # Register cleanup function for socket file
     def cleanup_socket():
@@ -260,6 +280,8 @@ async def run_application(app: Dict[str, Any]) -> int:
             if socket_server:
                 logger.info("Stopping Unix socket server")
                 await socket_server.stop()
+            
+            # No route cleanup needed - using project-based auto-discovery
 
         except Exception as e:
             logger.error("Error during shutdown", error=str(e))
@@ -277,9 +299,17 @@ async def main() -> None:
     """Main application entry point."""
     args = parse_args()
 
-    # Setup logging with file output
-    log_file = "telegram-claude-bot.log"
-    setup_logging(debug=args.debug, log_file=log_file)
+    # Load config first to get session info for log file naming
+    from src.config import load_config
+    config = load_config(config_file=args.config_file)
+    
+    # Setup logging with file output using session ID from pane
+    if config.pane:
+        session_id = config.pane.split(":")[0]
+        log_file = f"telegram-claude-bot-session-{session_id}.log"
+    else:
+        log_file = "telegram-claude-bot.log"
+    setup_logging(debug=args.debug or config.debug, log_file=log_file)
 
     logger = structlog.get_logger()
     logger.info("=" * 80)
@@ -288,10 +318,6 @@ async def main() -> None:
     )
 
     try:
-        # Load configuration
-        from src.config import load_config
-
-        config = load_config(config_file=args.config_file)
 
         logger.info(
             "Configuration loaded",

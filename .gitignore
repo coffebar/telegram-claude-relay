@@ -142,3 +142,6 @@ data/
 # Bot-specific
 tool_schemas.json
 telegram-relay.sock
+# Bot configuration files with secrets
+.env.bot*
+!.env.bot*.example
