@@ -165,9 +165,10 @@ class CommandDiscovery:
         if name[0].isdigit():
             return False
 
-        # Allow alphanumeric, underscore, and hyphen
+        # Allow only alphanumeric and underscore (Telegram bot command requirement)
+        # Hyphens are NOT allowed in Telegram bot commands
         allowed_chars = set(
-            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
         )
         if not all(c in allowed_chars for c in name):
             return False

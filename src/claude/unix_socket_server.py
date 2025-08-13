@@ -23,7 +23,7 @@ class UnixSocketServer:
     def __init__(self, config: Settings, conversation_monitor: ConversationMonitor):
         self.config = config
         self.monitor = conversation_monitor
-        self.socket_path = Path.cwd() / "telegram-relay.sock"
+        self.socket_path = Path.cwd() / config.socket_path
         self.server: Optional[asyncio.Server] = None
         # Track recent PreToolUse hooks to distinguish permission vs idle notifications
         self.recent_tool_usage: Dict[str, float] = {}  # session_id -> timestamp

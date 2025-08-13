@@ -31,12 +31,13 @@ class TmuxClient:
         """
         from src.tmux.exceptions import TmuxPaneNotFoundError
 
+        # First try: Check pane_current_command directly
         cmd = [
             "tmux",
             "list-panes",
             "-a",
             "-F",
-            "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command}",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command} #{pane_pid}",
         ]
 
         try:
@@ -51,9 +52,20 @@ class TmuxClient:
 
             output = stdout.decode().strip()
             for line in output.split("\n"):
-                parts = line.split(" ", 1)
-                if len(parts) == 2 and parts[1] == "claude":
-                    return parts[0]
+                parts = line.split(" ", 2)
+                if len(parts) >= 2:
+                    pane_target = parts[0]
+                    pane_cmd = parts[1]
+                    
+                    # Direct match
+                    if pane_cmd == "claude":
+                        return pane_target
+                    
+                    # Check process tree for claude child process
+                    if len(parts) == 3:
+                        pane_pid = parts[2]
+                        if await TmuxClient._has_claude_child_process(pane_pid):
+                            return pane_target
 
             raise TmuxPaneNotFoundError("No pane running 'claude' application found")
 
@@ -61,6 +73,66 @@ class TmuxClient:
             raise TmuxCommandError("tmux command not found. Is tmux installed?") from e
         except Exception as e:
             raise TmuxCommandError(f"Failed to discover claude pane: {e}") from e
+
+    @staticmethod
+    async def _has_claude_child_process(pid: str) -> bool:
+        """Check if a process has a claude child process.
+        
+        Args:
+            pid: Process ID to check
+            
+        Returns:
+            True if claude is found in the process tree
+        """
+        try:
+            # Use pgrep to find claude processes with this parent PID
+            cmd = ["pgrep", "-P", pid, "-x", "claude"]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await proc.communicate()
+            
+            # If pgrep finds any matches, it returns 0
+            if proc.returncode == 0 and stdout.strip():
+                return True
+                
+            # Also check grandchildren (claude might be a grandchild)
+            # Get all children first
+            cmd = ["pgrep", "-P", pid]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await proc.communicate()
+            
+            if proc.returncode == 0 and stdout.strip():
+                child_pids = stdout.decode().strip().split("\n")
+                for child_pid in child_pids:
+                    # Check each child for claude grandchildren
+                    cmd = ["pgrep", "-P", child_pid, "-x", "claude"]
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, _ = await proc.communicate()
+                    if proc.returncode == 0 and stdout.strip():
+                        return True
+                        
+        except Exception:
+            # If pgrep fails, fall back to ps-based check
+            try:
+                cmd = ["ps", "-p", pid, "-o", "comm="]
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                )
+                stdout, _ = await proc.communicate()
+                if proc.returncode == 0:
+                    # Check if this process itself is claude
+                    process_name = stdout.decode().strip()
+                    if "claude" in process_name.lower():
+                        return True
+            except Exception:
+                pass
+                
+        return False
 
     async def _run_tmux_command(self, args: List[str]) -> str:
         """Execute tmux command and return output.

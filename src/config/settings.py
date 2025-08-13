@@ -69,6 +69,10 @@ class Settings(BaseSettings):
         True,
         description="Only process hooks from Claude instances in the same working directory",
     )
+    socket_path: Optional[str] = Field(
+        None,
+        description="Unix socket path for hook communication. Auto-generated from pane if not specified.",
+    )
 
     # Monitoring
     log_level: str = Field("INFO", description="Logging level")
@@ -113,6 +117,11 @@ class Settings(BaseSettings):
             raise ValueError(
                 "auth_token_secret required when enable_token_auth is True"
             )
+        
+        # Socket path will be auto-generated based on project name later
+        if self.socket_path is None:
+            # Temporary default - will be replaced with project-based name
+            self.socket_path = "telegram-relay.sock"
 
         return self
 
