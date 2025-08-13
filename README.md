@@ -62,6 +62,8 @@ claude
 # In a separate terminal
 cd telegram-claude-relay
 make run
+# or specify a .env file for a specific bot:
+make run 2          # For .env.2
 ```
 
 ## Usage
@@ -101,14 +103,30 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 - `TELEGRAM_BOT_TOKEN` - Your bot token
 - `TELEGRAM_BOT_USERNAME` - Your bot username
 - `ALLOWED_USERS` - Comma-separated Telegram user IDs
-- `PANE` - Target tmux pane (format: `session:window.pane`)
+- `PANE` - Target tmux pane (format: `session:window.pane`, leave empty for auto-discovery)
+- `FILTER_HOOKS_BY_CWD` - Filter hooks by working directory (default: `true`)
 - `DEBUG` - Enable debug logging (optional)
+
+## Multi-Bot Support
+
+Run multiple bots monitoring different projects:
+
+```bash
+# Create separate config for each bot
+cp .env.example .env.2           # Numbered bot config
+cp .env.example .env.prod        # Named bot config
+
+# Run specific bot
+make run                          # Default bot (uses .env)
+make run 2                        # Bot 2 (uses .env.2)
+make run prod                     # Production bot (uses .env.prod)
+```
 
 ## Commands
 
 ```bash
 make setup       # Create venv and install dependencies
-make run         # Run the bot
+make run         # Run the bot (or make run <name> for specific bot)
 make stop        # Stop the bot gracefully
 make restart     # Trigger bot restart in same terminal (sends SIGUSR1)
 make clean       # Remove venv

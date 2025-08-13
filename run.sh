@@ -7,6 +7,34 @@ if [ ! -d "venv" ]; then
 	exit 1
 fi
 
+# Determine which config file to use
+BOT_NAME="$1"
+if [ -z "$BOT_NAME" ]; then
+	# No parameter - use default .env
+	CONFIG_FILE=".env"
+	BOT_DISPLAY="default"
+else
+	# Parameter provided - use .env.<parameter>
+	CONFIG_FILE=".env.$BOT_NAME"
+	BOT_DISPLAY="$BOT_NAME"
+	
+	# Check for unexpected additional arguments
+	if [ $# -gt 1 ]; then
+		echo "⚠️  Warning: Extra arguments ignored"
+		echo "Usage: $0 [bot_name]"
+	fi
+fi
+
+# Check if config file exists
+if [ ! -f "$CONFIG_FILE" ]; then
+	echo "❌ Configuration file $CONFIG_FILE not found."
+	echo "Available configurations:"
+	for f in .env .env.*; do
+		[ -f "$f" ] && [[ ! "$f" =~ \.example$ ]] && echo "  $f"
+	done
+	exit 1
+fi
+
 # Store PID of child process
 CHILD_PID=""
 
@@ -28,7 +56,12 @@ trap cleanup SIGHUP SIGINT SIGTERM
 source venv/bin/activate
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
-echo "🤖 Starting Claude Code Telegram Bot with auto-restart support..."
+# Load the configuration
+set -a  # Export all variables
+source "$CONFIG_FILE"
+set +a
+
+echo "🤖 Starting Claude Code Telegram Bot [$BOT_DISPLAY] with auto-restart support..."
 
 # Main loop - restart on exit code 42
 while true; do

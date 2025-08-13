@@ -32,8 +32,13 @@ setup:
 	@echo "Setting up bot..."
 	@./setup.sh
 
+# Run default bot or specified bot (e.g., make run, make run 2, make run botprod)
 run:
-	@./run.sh
+	@./run.sh $(filter-out $@,$(MAKECMDGOALS))
+
+# Catch any additional arguments to 'make run'
+%:
+	@:
 
 stop:
 	@if [ -e "telegram-relay.sock" ]; then \
