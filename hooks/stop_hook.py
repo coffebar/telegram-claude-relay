@@ -6,6 +6,7 @@ import socket
 import sys
 
 from pathlib import Path
+
 from hook_utils import get_socket_for_project
 
 
@@ -16,7 +17,7 @@ def main():
     try:
         # Read hook input from stdin
         hook_input = json.loads(sys.stdin.read())
-        
+
         # Get CWD from hook data to determine which socket to use
         cwd = hook_input.get("cwd", "")
         socket_name = get_socket_for_project(cwd)

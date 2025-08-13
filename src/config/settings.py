@@ -117,7 +117,7 @@ class Settings(BaseSettings):
             raise ValueError(
                 "auth_token_secret required when enable_token_auth is True"
             )
-        
+
         # Socket path will be auto-generated based on project name later
         if self.socket_path is None:
             # Temporary default - will be replaced with project-based name

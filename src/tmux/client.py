@@ -56,11 +56,11 @@ class TmuxClient:
                 if len(parts) >= 2:
                     pane_target = parts[0]
                     pane_cmd = parts[1]
-                    
+
                     # Direct match
                     if pane_cmd == "claude":
                         return pane_target
-                    
+
                     # Check process tree for claude child process
                     if len(parts) == 3:
                         pane_pid = parts[2]
@@ -77,10 +77,10 @@ class TmuxClient:
     @staticmethod
     async def _has_claude_child_process(pid: str) -> bool:
         """Check if a process has a claude child process.
-        
+
         Args:
             pid: Process ID to check
-            
+
         Returns:
             True if claude is found in the process tree
         """
@@ -91,11 +91,11 @@ class TmuxClient:
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, _ = await proc.communicate()
-            
+
             # If pgrep finds any matches, it returns 0
             if proc.returncode == 0 and stdout.strip():
                 return True
-                
+
             # Also check grandchildren (claude might be a grandchild)
             # Get all children first
             cmd = ["pgrep", "-P", pid]
@@ -103,19 +103,21 @@ class TmuxClient:
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, _ = await proc.communicate()
-            
+
             if proc.returncode == 0 and stdout.strip():
                 child_pids = stdout.decode().strip().split("\n")
                 for child_pid in child_pids:
                     # Check each child for claude grandchildren
                     cmd = ["pgrep", "-P", child_pid, "-x", "claude"]
                     proc = await asyncio.create_subprocess_exec(
-                        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
                     )
                     stdout, _ = await proc.communicate()
                     if proc.returncode == 0 and stdout.strip():
                         return True
-                        
+
         except Exception:
             # If pgrep fails, fall back to ps-based check
             try:
@@ -131,7 +133,7 @@ class TmuxClient:
                         return True
             except Exception:
                 pass
-                
+
         return False
 
     async def _run_tmux_command(self, args: List[str]) -> str:
