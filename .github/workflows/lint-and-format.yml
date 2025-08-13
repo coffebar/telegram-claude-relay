@@ -1,0 +1,97 @@
+name: Lint and Format Check
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+      - '.github/workflows/lint-and-format.yml'
+  push:
+    branches: [ main ]
+    paths:
+      - '**.py'
+      - 'pyproject.toml'
+      - '.github/workflows/lint-and-format.yml'
+
+jobs:
+  lint-and-format:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install formatting tools with exact versions to match local development
+        pip install black isort ruff
+        # The pyproject.toml file contains all the configuration
+    
+    - name: Check formatting with black
+      run: |
+        # Black will read configuration from pyproject.toml
+        black --check --diff src/ hooks/ scripts/
+      continue-on-error: true
+      id: black-check
+    
+    - name: Check import sorting with isort
+      run: |
+        # isort will read configuration from pyproject.toml
+        isort --check-only --diff src/ hooks/ scripts/
+      continue-on-error: true
+      id: isort-check
+    
+    - name: Run ruff linting
+      run: |
+        # Ruff will read configuration from pyproject.toml
+        ruff check src/ hooks/ scripts/
+      continue-on-error: true
+      id: ruff-check
+    
+    - name: Comment PR with formatting instructions
+      if: steps.black-check.outcome == 'failure' || steps.isort-check.outcome == 'failure' || steps.ruff-check.outcome == 'failure'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{secrets.GITHUB_TOKEN}}
+        script: |
+          const output = `
+          ## 🔧 Formatting/Linting Issues Detected
+          
+          Your code has formatting or linting issues. Please run the following locally:
+          
+          \`\`\`bash
+          make format  # Auto-format with black and isort
+          make lint    # Check for any remaining issues
+          \`\`\`
+          
+          Then commit and push the changes.
+          `;
+          
+          if (context.eventName === 'pull_request') {
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            });
+          }
+    
+    - name: Fail if formatting/linting issues found
+      if: steps.black-check.outcome == 'failure' || steps.isort-check.outcome == 'failure' || steps.ruff-check.outcome == 'failure'
+      run: |
+        echo "::error::Code formatting or linting issues detected. Please run 'make format' and 'make lint' locally and commit the changes."
+        exit 1
