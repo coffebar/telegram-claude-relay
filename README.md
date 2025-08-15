@@ -193,10 +193,6 @@ tmux send-keys -t claude-session "claude" Enter
 - Verify your Telegram user ID is in `ALLOWED_USERS`
 - Test Claude directly in tmux: `tmux send-keys -t your-pane "test message" Enter`
 
-## TODO
-
-- [ ] Cache target pane discovery to reduce permission dialog latency
-
 ### Tool Usage Transparency
 
 - **Evidence-Based Tool Messages**: Scientific approach to tool transparency
