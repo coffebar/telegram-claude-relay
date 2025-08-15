@@ -111,8 +111,6 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
-    parser.add_argument("--config-file", type=Path, help="Path to configuration file")
-
     return parser.parse_args()
 
 
@@ -331,7 +329,7 @@ async def main() -> None:
     # Load config first to get session info for log file naming
     from src.config import load_config
 
-    config = load_config(config_file=args.config_file)
+    config = load_config()
 
     # Setup logging with file output using session ID from pane
     if config.pane:
