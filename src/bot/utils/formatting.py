@@ -52,8 +52,6 @@ class ResponseFormatter:
             text = self._format_code_blocks(text)
             messages = self._split_message(text)
 
-        # Quick actions removed - text-only interface
-
         return messages if messages else [FormattedMessage("_(No content to display)_")]
 
     def _should_use_semantic_chunking(self, text: str) -> bool:

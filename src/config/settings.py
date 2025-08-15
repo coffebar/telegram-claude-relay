@@ -57,9 +57,6 @@ class Settings(BaseSettings):
         DEFAULT_RATE_LIMIT_BURST, description="Burst capacity"
     )
 
-    # Storage (in-memory only for tmux mode)
-    # Database settings removed - using in-memory storage only
-
     # tmux Integration
     pane: Optional[str] = Field(
         None,
@@ -130,8 +127,6 @@ class Settings(BaseSettings):
         """Check if running in production mode."""
         return not (self.debug or self.development_mode)
 
-    # Database path property removed - using in-memory storage only
-
     @property
     def telegram_token_str(self) -> str:
         """Get Telegram token as string."""
@@ -143,5 +138,3 @@ class Settings(BaseSettings):
         if self.auth_token_secret:
             return self.auth_token_secret.get_secret_value()
         return None
-
-    # Anthropic API key property removed - using tmux mode only
