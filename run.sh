@@ -56,15 +56,15 @@ trap cleanup SIGHUP SIGINT SIGTERM
 source venv/bin/activate
 export PYTHONPATH="${PYTHONPATH}:$(pwd)"
 
-# Load the configuration
-set -a  # Export all variables
-source "$CONFIG_FILE"
-set +a
-
 echo "🤖 Starting Claude Code Telegram Bot [$BOT_DISPLAY] with auto-restart support..."
 
 # Main loop - restart on exit code 42
 while true; do
+	# Load/reload the configuration
+	set -a  # Export all variables
+	source "$CONFIG_FILE"
+	set +a
+	
 	# Run bot in background and capture PID
 	python src/main.py &
 	CHILD_PID=$!
