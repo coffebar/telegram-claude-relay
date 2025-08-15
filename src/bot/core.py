@@ -369,6 +369,17 @@ class ClaudeTelegramBot:
     ) -> None:
         """Handle errors globally."""
         error = context.error
+
+        # Special handling for SystemExit with code 42 (self-update restart)
+        if isinstance(error, SystemExit) and error.code == 42:
+            logger.info("Self-update restart requested, sending SIGUSR1 signal")
+            # Use signal instead of re-raising to avoid task exception
+            import os
+            import signal
+
+            os.kill(os.getpid(), signal.SIGUSR1)
+            return
+
         logger.error(
             "Global error handler triggered",
             error=str(error),

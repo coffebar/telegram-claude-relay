@@ -131,7 +131,8 @@ async def self_update_command(
 
     logger.info("Self-update command executed", user_id=user.id)
 
-    # Exit with code 42 to trigger update in wrapper script
-    import sys
+    # Send SIGUSR1 signal to trigger restart (handled in main.py)
+    import os
+    import signal
 
-    sys.exit(42)
+    os.kill(os.getpid(), signal.SIGUSR1)
