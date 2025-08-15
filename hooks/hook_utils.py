@@ -60,7 +60,7 @@ def handle_hook_event(hook_event_name, default_response=None):
             # Parent process: exit immediately to unblock Claude
             if default_response is None:
                 default_response = {"continue": True}
-            
+
             print(json.dumps(default_response))
             sys.stdout.flush()
             sys.exit(0)
@@ -68,7 +68,7 @@ def handle_hook_event(hook_event_name, default_response=None):
         # Fork failed, fall back to immediate exit with response
         if default_response is None:
             default_response = {"continue": True}
-        
+
         print(json.dumps(default_response))
         sys.stdout.flush()
         sys.exit(0)
