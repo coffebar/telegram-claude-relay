@@ -84,6 +84,36 @@ async def compact_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await _forward_claude_command(update, context, "/compact")
 
 
+async def esc_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /esc command - sends Escape key to Claude tmux pane."""
+    user = update.effective_user
+
+    # Get Claude integration from context
+    claude_integration = context.bot_data.get("claude_integration")
+    if not claude_integration:
+        await update.message.reply_text("❌ Claude service is not available.")
+        return
+
+    try:
+        # Send typing indicator
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id, action="typing"
+        )
+
+        # Send Escape key directly to Claude via tmux
+        await claude_integration._ensure_tmux_integration()
+        await claude_integration.tmux_integration.tmux_client.send_escape_key()
+
+        await update.message.reply_text("✅ Sent ESC key to Claude")
+
+    except Exception as e:
+        logger.error("Error executing /esc command", error=str(e), user_id=user.id)
+        await update.message.reply_text("❌ Failed to send ESC key. Please try again.")
+
+    # Log command
+    logger.info("/esc command executed", user_id=user.id)
+
+
 async def self_update_command(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:

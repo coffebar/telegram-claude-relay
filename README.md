@@ -79,6 +79,7 @@ The bot uses Claude Code hooks to provide real-time tool notifications and live-
 ### Bot Commands
 
 - `/start` - Show welcome message
+- `/esc` - Send ESC key to Claude (useful for canceling operations or exiting modes)
 - `/self_update` - Update bot from GitHub and restart automatically
 - Any other text - Sent directly to Claude (including `/clear`, `/compact`, etc.)
 

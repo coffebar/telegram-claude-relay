@@ -116,6 +116,7 @@ class ClaudeTelegramBot:
         commands = [
             BotCommand("clear", "Clear Claude's conversation history"),
             BotCommand("compact", "Compact Claude's conversation"),
+            BotCommand("esc", "Send ESC key to Claude (cancel current operation)"),
             BotCommand("self_update", "Update bot from GitHub and restart"),
         ]
 
@@ -154,6 +155,7 @@ class ClaudeTelegramBot:
             ("start", command.start_command),
             ("clear", command.clear_command),
             ("compact", command.compact_command),
+            ("esc", command.esc_command),
             ("self_update", command.self_update_command),
         ]
 
@@ -175,7 +177,7 @@ class ClaudeTelegramBot:
 
         self.app.add_handler(
             MessageHandler(
-                filters.TEXT,
+                filters.TEXT & ~filters.COMMAND,
                 self._inject_deps(message.handle_text_message),
             ),
             group=10,

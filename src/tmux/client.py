@@ -182,6 +182,15 @@ class TmuxClient:
         # Send Enter to submit
         await self._run_tmux_command(["send-keys", "-t", self.pane_target, "Enter"])
 
+    async def send_escape_key(self) -> None:
+        """Send Escape key to tmux pane.
+
+        Raises:
+            TmuxCommandError: If sending fails
+        """
+        # Send the Escape key directly without Enter
+        await self._run_tmux_command(["send-keys", "-t", self.pane_target, "Escape"])
+
     async def capture_output(self, lines: int = 100) -> str:
         """Capture recent pane content.
 
