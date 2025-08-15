@@ -64,18 +64,48 @@ def setup_logging(
 
     # Configure structlog
     if debug:
-        # Full structured logging with console renderer when debugging
+        # Configure console handler with colors
+        console_handler.setFormatter(
+            structlog.stdlib.ProcessorFormatter(
+                processor=structlog.dev.ConsoleRenderer(colors=True),
+                foreign_pre_chain=[
+                    structlog.stdlib.add_logger_name,
+                    structlog.stdlib.add_log_level,
+                    structlog.stdlib.PositionalArgumentsFormatter(),
+                    structlog.processors.TimeStamper(fmt="iso"),
+                    structlog.processors.StackInfoRenderer(),
+                    structlog.processors.format_exc_info,
+                    structlog.processors.UnicodeDecoder(),
+                ],
+            )
+        )
+
+        # Configure file handler without colors
+        file_handler.setFormatter(
+            structlog.stdlib.ProcessorFormatter(
+                processor=structlog.processors.JSONRenderer(),
+                foreign_pre_chain=[
+                    structlog.stdlib.add_logger_name,
+                    structlog.stdlib.add_log_level,
+                    structlog.stdlib.PositionalArgumentsFormatter(),
+                    structlog.processors.TimeStamper(fmt="iso"),
+                    structlog.processors.StackInfoRenderer(),
+                    structlog.processors.format_exc_info,
+                    structlog.processors.UnicodeDecoder(),
+                ],
+            )
+        )
+
+        # Basic structlog configuration for debug mode
         structlog.configure(
             processors=[
                 structlog.stdlib.filter_by_level,
-                structlog.stdlib.add_logger_name,
-                structlog.stdlib.add_log_level,
                 structlog.stdlib.PositionalArgumentsFormatter(),
                 structlog.processors.TimeStamper(fmt="iso"),
                 structlog.processors.StackInfoRenderer(),
                 structlog.processors.format_exc_info,
                 structlog.processors.UnicodeDecoder(),
-                structlog.dev.ConsoleRenderer(),
+                structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
             ],
             context_class=dict,
             logger_factory=structlog.stdlib.LoggerFactory(),
