@@ -41,7 +41,7 @@ def setup_logging(
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
-    # Only add handlers when debugging
+    # Add detailed handlers when debugging
     if debug:
         # Console handler
         console_handler = logging.StreamHandler(sys.stdout)
@@ -55,7 +55,7 @@ def setup_logging(
         file_handler = RotatingFileHandler(
             filename=log_file,
             maxBytes=10 * 1024 * 1024,  # 10MB
-            backupCount=5,
+            backupCount=2,
             encoding="utf-8",
         )
         file_handler.setLevel(level)
