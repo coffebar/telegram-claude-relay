@@ -8,6 +8,7 @@ import telegramify_markdown
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
+from ...claude.permission_monitor import permission_monitor
 from ...config.settings import Settings
 from ..utils.message_sender import RobustMessageSender
 
@@ -1044,6 +1045,9 @@ class ConversationWebhookHandler:
             if not dialog_info:
                 await callback_query.answer("This permission dialog has expired.")
                 return
+
+            # Notify permission monitor that user responded (for simplified dialog tracking)
+            permission_monitor.mark_user_responded(dialog_info["session_id"])
 
             # Send the response to Claude using the same integration as regular messages
             await self._send_permission_response_to_claude(

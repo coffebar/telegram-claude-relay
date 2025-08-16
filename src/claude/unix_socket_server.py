@@ -12,6 +12,7 @@ import structlog
 
 from ..config.settings import Settings
 from .conversation_monitor import ConversationMonitor
+from .permission_monitor import permission_monitor
 
 
 logger = structlog.get_logger()
@@ -26,17 +27,36 @@ class UnixSocketServer:
         self.socket_path = Path.cwd() / config.socket_path
         self.server: Optional[asyncio.Server] = None
         # Track recent PreToolUse hooks to distinguish permission vs idle notifications
-        self.recent_tool_usage: Dict[str, float] = {}  # session_id -> timestamp
+        # session_id -> timestamp
+        self.recent_tool_usage: Dict[str, float] = {}
         # Store recent tool context for fallback when transcript parsing fails
         self.recent_tool_context: Dict[str, Dict[str, Any]] = (
             {}
         )  # session_id -> tool_context
         self.tmux_client = None  # Will be set by the facade
         self.target_cwd = None  # CWD of the Claude process we're monitoring
+        # Track background tasks for proper cleanup
+        self.background_tasks: List[asyncio.Task] = []
 
     def set_tmux_client(self, tmux_client):
         """Set the tmux client reference for CWD checking."""
         self.tmux_client = tmux_client
+
+    async def set_conversation_monitor(self, conversation_monitor):
+        """Set the conversation monitor reference for permission monitor."""
+        await permission_monitor.configure(
+            unix_socket_server=self, conversation_monitor=conversation_monitor
+        )
+
+    def _create_background_task(self, coro):
+        """Create a background task and track it for cleanup."""
+        task = asyncio.create_task(coro)
+        self.background_tasks.append(task)
+
+        # Clean up completed tasks
+        self.background_tasks = [t for t in self.background_tasks if not t.done()]
+
+        return task
 
     async def initialize_target_cwd(self):
         """Get and store the CWD of the Claude process we're monitoring."""
@@ -87,17 +107,10 @@ class UnixSocketServer:
                 hook_data = json.loads(data.decode("utf-8"))
             except json.JSONDecodeError as e:
                 logger.error("Invalid JSON received", error=str(e))
-                response = {"status": "error", "message": "Invalid JSON"}
-                writer.write(json.dumps(response).encode("utf-8"))
-                await writer.drain()
                 return
 
-            # Process the hook event
-            response = await self.process_hook_event(hook_data)
-
-            # Send response
-            writer.write(json.dumps(response).encode("utf-8"))
-            await writer.drain()
+            # Process the hook event (fire and forget - no response needed)
+            await self.process_hook_event(hook_data)
 
         except Exception as e:
             logger.error("Error handling client connection", error=str(e))
@@ -213,7 +226,7 @@ class UnixSocketServer:
                 return {"status": "error", "message": "Missing required fields"}
 
             # Process transcript in background
-            asyncio.create_task(
+            self._create_background_task(
                 self.monitor.process_transcript(transcript_path, session_id)
             )
 
@@ -234,7 +247,7 @@ class UnixSocketServer:
             )
 
             # Send notification about new prompt
-            asyncio.create_task(
+            self._create_background_task(
                 self.monitor.send_hook_notification(
                     {
                         "type": "user_prompt",
@@ -272,11 +285,20 @@ class UnixSocketServer:
                     "timestamp": time.time(),
                 }
                 self._limit_dict_size(self.recent_tool_context)
-                logger.debug(
-                    "Stored tool context for fallback",
+                logger.info(
+                    "Stored tool context for fallback (PreToolUse)",
                     session_id=session_id,
                     tool_name=tool_name,
                     context_keys=list(self.recent_tool_context[session_id].keys()),
+                    full_tool_input=tool_input,  # Log full tool_input for debugging
+                )
+
+                # Start proactive permission monitoring
+                self._create_background_task(
+                    permission_monitor.start_monitoring(
+                        session_id=session_id,
+                        tool_context=self.recent_tool_context[session_id],
+                    )
                 )
 
             # Log all hook data with truncated values - this is the most important one for debugging
@@ -300,7 +322,7 @@ class UnixSocketServer:
             )
 
             # Send notification about tool use
-            asyncio.create_task(
+            self._create_background_task(
                 self.monitor.send_hook_notification(
                     {
                         "type": "pre_tool_use",
@@ -349,7 +371,7 @@ class UnixSocketServer:
             )
 
             # Send notification about tool result
-            asyncio.create_task(
+            self._create_background_task(
                 self.monitor.send_hook_notification(
                     {
                         "type": "post_tool_use",
@@ -372,6 +394,13 @@ class UnixSocketServer:
             message = hook_data.get("message", "")
             session_id = hook_data.get("session_id", "unknown")
             transcript_path = hook_data.get("transcript_path", "")
+
+            # First, notify permission monitor to stop monitoring and possibly update message
+            await permission_monitor.handle_notification_hook(
+                session_id=session_id,
+                message=message,
+                context=self.recent_tool_context.get(session_id, {}),
+            )
 
             # Detailed logging for permission dialog analysis (replaces truncated logging above)
             logger.info(
@@ -423,11 +452,14 @@ class UnixSocketServer:
 
                     if context:
                         logger.info(
-                            "Found matching tool context for permission dialog",
+                            "Found matching tool context for permission dialog (Notification)",
                             session_id=session_id,
                             permission_tool=permission_tool_name,
                             actual_tool=context.get("tool_use"),
                             tool_input_keys=list(context.get("tool_input", {}).keys()),
+                            full_tool_input=context.get(
+                                "tool_input"
+                            ),  # Log full tool_input for debugging
                         )
                     else:
                         # Fallback to most recent context
@@ -478,18 +510,8 @@ class UnixSocketServer:
                     transcript_path=transcript_path,
                 )
 
-                # Send permission dialog notification
-                asyncio.create_task(
-                    self.monitor.send_permission_dialog(
-                        {
-                            "type": "permission_dialog",
-                            "session_id": session_id,
-                            "message": message,
-                            "context": context,
-                            "timestamp": hook_data.get("timestamp"),
-                        }
-                    )
-                )
+                # Permission dialog is now handled entirely by permission_monitor.handle_notification_hook()
+                # which was called above. It handles deduplication and reliable fallback.
             else:
                 # Idle timeout or other notification (no recent tool usage)
                 logger.info(
@@ -497,7 +519,7 @@ class UnixSocketServer:
                     message=message,
                     session_id=session_id,
                 )
-                asyncio.create_task(
+                self._create_background_task(
                     self.monitor.send_hook_notification(
                         {
                             "type": "notification",
@@ -882,8 +904,20 @@ class UnixSocketServer:
             current_list[-1] = current_option_text.strip()
 
         # Use the last complete numbered list we found
+        # But only if it contains the ❯ symbol (permission dialog indicator)
         if current_list:
-            options = current_list
+            # Check if any line in the original content has "❯ 1." pattern
+            # This indicates it's a permission dialog, not a regular numbered list
+            has_permission_indicator = any(
+                "❯" in line and re.match(r".*❯\s*\d+\.\s+", line) for line in lines
+            )
+
+            if has_permission_indicator:
+                options = current_list
+            else:
+                logger.debug(
+                    "Ignoring numbered list without ❯ symbol", list_items=current_list
+                )
 
         logger.info(
             "Parsed permission options from tmux",
@@ -930,6 +964,23 @@ class UnixSocketServer:
         if self.server:
             self.server.close()
             await self.server.wait_closed()
+
+        # Cancel all background tasks
+        for task in self.background_tasks:
+            if not task.done():
+                task.cancel()
+
+        # Wait for tasks to complete with timeout
+        if self.background_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self.background_tasks, return_exceptions=True),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Some background tasks did not complete within timeout")
+
+        self.background_tasks.clear()
 
         # Remove socket file
         if self.socket_path.exists():

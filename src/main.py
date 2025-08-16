@@ -35,6 +35,12 @@ def setup_logging(
     # Clear existing handlers
     root_logger.handlers = []
 
+    # Reduce verbosity of specific noisy loggers
+    logging.getLogger("telegram.ext.ExtBot").setLevel(logging.WARNING)
+    logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     # Only add handlers when debugging
     if debug:
         # Console handler
@@ -292,6 +298,9 @@ async def run_application(app: Dict[str, Any]) -> int:
             # Start Unix socket server
             socket_server = UnixSocketServer(config, monitor)
 
+            # Configure permission monitor with conversation monitor reference
+            await socket_server.set_conversation_monitor(monitor)
+
             # Ensure tmux integration is initialized and pass client reference
             await claude_integration._ensure_tmux_integration()
             if (
@@ -332,6 +341,11 @@ async def run_application(app: Dict[str, Any]) -> int:
         try:
             await bot.stop()
             await claude_integration.shutdown()
+
+            # Clean up permission monitor
+            from .claude.permission_monitor import permission_monitor
+
+            await permission_monitor.shutdown()
 
             # Clean up socket server
             if socket_server:
