@@ -66,29 +66,22 @@ class ClaudeIntegration:
         # Ensure tmux integration is set up
         await self._ensure_tmux_integration()
 
-        working_dir = working_directory or Path.cwd()
-
         return await self._execute_with_fallback(
             prompt=prompt,
-            working_directory=working_dir,
             session_id=f"user_{user_id}",
         )
 
     async def _execute_with_fallback(
         self,
         prompt: str,
-        working_directory: Path,
         session_id: Optional[str] = None,
-        continue_session: bool = False,
         stream_callback: Optional[Callable] = None,
     ) -> ClaudeResponse:
         """Execute command via tmux only."""
         logger.debug("Executing via tmux")
         return await self.tmux_integration.execute_command(
             prompt=prompt,
-            working_directory=working_directory,
             session_id=session_id,
-            continue_session=continue_session,
             stream_callback=stream_callback,
         )
 

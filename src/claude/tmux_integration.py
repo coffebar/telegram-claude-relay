@@ -2,7 +2,6 @@
 
 import time
 
-from pathlib import Path
 from typing import Callable, Optional
 
 import structlog
@@ -33,18 +32,14 @@ class ClaudeTmuxIntegration:
     async def execute_command(
         self,
         prompt: str,
-        working_directory: Path,
         session_id: Optional[str] = None,
-        continue_session: bool = False,
         stream_callback: Optional[Callable] = None,
     ) -> ClaudeResponse:
         """Send command via tmux pane (response delivered via hooks).
 
         Args:
             prompt: User prompt to send to Claude
-            working_directory: Working directory (used for session context)
             session_id: Session ID for tracking
-            continue_session: Whether to continue existing session
             stream_callback: Optional callback for streaming updates (unused in hook mode)
 
         Returns:
