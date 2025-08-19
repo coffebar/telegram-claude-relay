@@ -407,7 +407,7 @@ class UnixSocketServer:
             transcript_path = hook_data.get("transcript_path", "")
 
             # First, notify permission monitor to stop monitoring and possibly update message
-            await permission_monitor.handle_notification_hook(
+            monitor_handled_dialog = await permission_monitor.handle_notification_hook(
                 session_id=session_id,
                 message=message,
                 context=self.recent_tool_context.get(session_id, {}),
@@ -430,10 +430,12 @@ class UnixSocketServer:
                 transcript_path=transcript_path,
                 has_recent_tool_usage=session_id in self.recent_tool_usage,
                 recent_tool_context=self.recent_tool_context.get(session_id, {}),
+                dialog_handled_by_monitor=monitor_handled_dialog,
             )
 
             # Check if this is a permission dialog based on message content
-            if self._is_permission_dialog(session_id, message):
+            # Skip processing if permission monitor already handled it
+            if not monitor_handled_dialog and self._is_permission_dialog(session_id, message):
                 logger.info(
                     "PERMISSION_DIALOG_DETECTED",  # Make it easy to grep for these
                     session_id=session_id,
@@ -738,66 +740,50 @@ class UnixSocketServer:
     async def _read_tmux_pane_content(self) -> str:
         """Read current tmux pane content to extract permission options."""
         try:
-            import subprocess
-
-            # Get the target pane (same logic as tmux integration)
-            if self.config.pane:
-                target_pane = self.config.pane
-            else:
-                # Auto-discover Claude pane
-                result = subprocess.run(
-                    [
-                        "tmux",
-                        "list-panes",
-                        "-a",
-                        "-F",
-                        "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command}",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-
-                if result.returncode != 0:
-                    return ""
-
-                # Find pane running claude (same logic as facade.py)
-                for line in result.stdout.strip().split("\n"):
-                    parts = line.split(" ", 1)
-                    if len(parts) == 2 and parts[1] == "claude":
-                        target_pane = parts[0]
-                        break
-                else:
-                    return ""
-
-            # Capture pane content (last 30 lines should be enough)
-            result = subprocess.run(
-                ["tmux", "capture-pane", "-t", target_pane, "-p", "-S", "-30"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-
-            if result.returncode == 0:
-                content = result.stdout
+            # Use the shared tmux client from facade instead of doing separate discovery
+            if self.tmux_client:
+                # Use the same pane that the facade is using
+                content = await self.tmux_client.capture_output(lines=50)
                 logger.info(
-                    "Captured tmux pane content",
-                    target_pane=target_pane,
+                    "Captured tmux pane content via shared client",
+                    target_pane=self.tmux_client.pane_target,
                     content_length=len(content),
                     content_preview=content[-200:] if content else "",
                 )
                 return content
             else:
-                logger.warning(
-                    "Failed to capture tmux pane content",
-                    returncode=result.returncode,
-                    stderr=result.stderr,
-                )
+                logger.warning("No tmux client available for pane capture")
                 return ""
 
         except Exception as e:
-            logger.error("Error reading tmux pane content", error=str(e))
-            return ""
+            logger.error("Error reading tmux pane content via client", error=str(e))
+
+            # Fallback: try to discover and create a temporary client
+            try:
+                from src.tmux.client import TmuxClient
+
+                # Use configured pane or auto-discover
+                if self.config.pane:
+                    target_pane = self.config.pane.strip()
+                    logger.info("Using configured pane for fallback", pane=target_pane)
+                else:
+                    target_pane = await TmuxClient.discover_claude_pane()
+                    logger.info("Auto-discovered pane for fallback", pane=target_pane)
+
+                # Create temporary client and capture content
+                temp_client = TmuxClient(target_pane)
+                content = await temp_client.capture_output(lines=50)
+                logger.info(
+                    "Captured tmux pane content via fallback client",
+                    target_pane=target_pane,
+                    content_length=len(content),
+                    content_preview=content[-200:] if content else "",
+                )
+                return content
+
+            except Exception as fallback_error:
+                logger.error("Fallback pane capture failed", error=str(fallback_error))
+                return ""
 
     def _extract_tool_name_from_permission_message(self, message: str) -> Optional[str]:
         """Extract tool name from permission message.

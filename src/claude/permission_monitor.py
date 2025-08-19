@@ -424,17 +424,20 @@ class PermissionMonitor:
 
     async def send_full_permission_dialog(
         self, session_id: str, full_message: str, full_context: Dict[str, Any]
-    ) -> None:
+    ) -> bool:
         """Send full permission dialog when Notification hook arrives.
 
         Skips only if:
         1. Simplified message was sent for this exact tool context
         2. User already responded to the simplified dialog
+
+        Returns:
+            True if dialog was sent, False if skipped (duplicate) or failed
         """
         try:
             if not self.conversation_monitor:
                 logger.warning("No conversation monitor configured")
-                return
+                return False
 
             simplified_info = self.simplified_dialogs.get(session_id)
 
@@ -481,12 +484,11 @@ class PermissionMonitor:
                         hash_mismatch=True,
                     )
 
-            # Clean up tracking data
-            if session_id in self.simplified_dialogs:
-                del self.simplified_dialogs[session_id]
-
             if should_skip:
-                return
+                # Clean up tracking data for duplicate
+                if session_id in self.simplified_dialogs:
+                    del self.simplified_dialogs[session_id]
+                return False  # Dialog was skipped (duplicate)
 
             # Send full permission dialog using existing conversation monitor method
             dialog_data = {
@@ -498,12 +500,17 @@ class PermissionMonitor:
 
             await self.conversation_monitor.send_permission_dialog(dialog_data)
 
+            # Clean up tracking data after successful send
+            if session_id in self.simplified_dialogs:
+                del self.simplified_dialogs[session_id]
+
             logger.info(
                 "Sent full permission dialog",
                 session_id=session_id,
                 full_message_length=len(full_message),
                 had_simplified=simplified_info is not None,
             )
+            return True  # Dialog was sent
 
         except Exception as e:
             logger.error(
@@ -512,6 +519,7 @@ class PermissionMonitor:
                 error=str(e),
                 exc_info=True,
             )
+            return False  # Failed to send
 
     def mark_user_responded(self, session_id: str) -> None:
         """Mark that user responded to a simplified permission dialog."""
@@ -559,23 +567,33 @@ class PermissionMonitor:
 
     async def handle_notification_hook(
         self, session_id: str, message: str, context: Dict[str, Any]
-    ) -> None:
+    ) -> bool:
         """Handle Notification hook - stop monitoring and update message if needed.
 
         Args:
             session_id: The Claude session ID
             message: The notification message
             context: Full context from the hook
+
+        Returns:
+            True if permission dialog was handled (sent or skipped duplicate),
+            False if unix socket server should continue processing
         """
         try:
             # Stop any active monitoring for this session
             await self.stop_monitoring(session_id)
 
-            # Check if we have a simplified message - send full dialog as new message
+            # Check if we have a simplified message - compare hashes and decide
             if session_id in self.simplified_dialogs:
-                await self.send_full_permission_dialog(
+                was_sent = await self.send_full_permission_dialog(
                     session_id=session_id, full_message=message, full_context=context
                 )
+                # Always return True when simplified dialog exists - we "handled" it
+                # (either by sending new dialog or by skipping duplicate)
+                return True
+            
+            # No simplified dialog exists - let unix socket server handle it
+            return False
 
         except Exception as e:
             logger.error(
@@ -584,6 +602,7 @@ class PermissionMonitor:
                 error=str(e),
                 exc_info=True,
             )
+            return False
 
 
 # Global singleton instance
