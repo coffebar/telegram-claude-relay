@@ -1178,8 +1178,8 @@ class ConversationWebhookHandler:
         # Notify users that they are subscribed
         notification_message = (
             "🚀 **Bot Started**\n\n"
-            "You are now subscribed to receive Claude conversation updates.\n"
-            "You'll receive notifications when Claude uses tools or performs actions."
+            "You are now subscribed to receive Claude conversation updates\\.\n"
+            "You'll receive notifications when Claude uses tools or performs actions\\."
         )
 
         success_count = 0
