@@ -92,9 +92,18 @@ class Settings(BaseSettings):
     @field_validator("allowed_users", mode="before")
     @classmethod
     def parse_allowed_users(cls, v: Any) -> Optional[List[int]]:
-        """Parse comma-separated user IDs."""
+        """Parse comma-separated user IDs or single user ID."""
+        if v is None:
+            return None
+        if isinstance(v, int):
+            # Single integer provided - convert to list
+            return [v]
         if isinstance(v, str):
+            # Handle both single ID and comma-separated IDs
             return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
+        if isinstance(v, list):
+            # Already a list - ensure all items are integers
+            return [int(uid) for uid in v]
         return v  # type: ignore[no-any-return]
 
     @field_validator("log_level")
