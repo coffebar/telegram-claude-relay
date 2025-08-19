@@ -272,12 +272,23 @@ class UnixSocketServer:
 
             # Store tool context for fallback when transcript parsing fails
             if tool_name in [
+                "Bash",
                 "Edit",
                 "MultiEdit",
                 "Write",
-                "Bash",
-                "ExitPlanMode",
                 "Read",
+                "Glob",
+                "Grep",
+                "LS",
+                "NotebookRead",
+                "NotebookEdit",
+                "Task",
+                "TodoWrite",
+                "WebFetch",
+                "WebSearch",
+                "TodoRead",
+                "Batch",
+                "ExitPlanMode",  # Keep this one too as it might be used
             ]:
                 self.recent_tool_context[session_id] = {
                     "tool_use": tool_name,
@@ -478,7 +489,12 @@ class UnixSocketServer:
                                 session_id=session_id,
                                 permission_tool=permission_tool_name,
                             )
-                            return {"continue": True}
+                            # Create minimal context with just the tool name so dialog can still be sent
+                            context = {
+                                "tool_use": permission_tool_name,
+                                "tool_input": {},
+                                "timestamp": time.time(),
+                            }
                 else:
                     # Can't parse tool name, use recent context
                     recent_context = self.recent_tool_context.get(session_id, {})
@@ -494,7 +510,12 @@ class UnixSocketServer:
                             "No tool context available for permission dialog",
                             session_id=session_id,
                         )
-                        return {"continue": True}
+                        # Create minimal context for unknown tool so dialog can still be sent
+                        context = {
+                            "tool_use": "Unknown",
+                            "tool_input": {},
+                            "timestamp": time.time(),
+                        }
 
                 # Read tmux pane to get actual permission options
                 tmux_content = await self._read_tmux_pane_content()
@@ -510,8 +531,10 @@ class UnixSocketServer:
                     transcript_path=transcript_path,
                 )
 
-                # Permission dialog is now handled entirely by permission_monitor.handle_notification_hook()
-                # which was called above. It handles deduplication and reliable fallback.
+                # Send permission dialog to Telegram via permission monitor
+                await permission_monitor.send_full_permission_dialog(
+                    session_id=session_id, full_message=message, full_context=context
+                )
             else:
                 # Idle timeout or other notification (no recent tool usage)
                 logger.info(
@@ -827,6 +850,27 @@ class UnixSocketServer:
         if permission_tool_name == "Fetch" and actual_tool_name in [
             "WebFetch",
             "Fetch",
+        ]:
+            return recent_context
+
+        # Handle Search -> web search tools mapping
+        if permission_tool_name == "Search" and actual_tool_name in [
+            "WebSearch",
+            "Search",
+        ]:
+            return recent_context
+
+        # Handle NbRead -> notebook read tools mapping
+        if permission_tool_name == "NbRead" and actual_tool_name in [
+            "NotebookRead",
+            "NbRead",
+        ]:
+            return recent_context
+
+        # Handle NbEdit -> notebook edit tools mapping
+        if permission_tool_name == "NbEdit" and actual_tool_name in [
+            "NotebookEdit",
+            "NbEdit",
         ]:
             return recent_context
 
