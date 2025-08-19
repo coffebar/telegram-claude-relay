@@ -585,13 +585,13 @@ class PermissionMonitor:
 
             # Check if we have a simplified message - compare hashes and decide
             if session_id in self.simplified_dialogs:
-                was_sent = await self.send_full_permission_dialog(
+                await self.send_full_permission_dialog(
                     session_id=session_id, full_message=message, full_context=context
                 )
                 # Always return True when simplified dialog exists - we "handled" it
                 # (either by sending new dialog or by skipping duplicate)
                 return True
-            
+
             # No simplified dialog exists - let unix socket server handle it
             return False
 

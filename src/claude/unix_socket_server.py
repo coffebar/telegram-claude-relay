@@ -435,7 +435,9 @@ class UnixSocketServer:
 
             # Check if this is a permission dialog based on message content
             # Skip processing if permission monitor already handled it
-            if not monitor_handled_dialog and self._is_permission_dialog(session_id, message):
+            if not monitor_handled_dialog and self._is_permission_dialog(
+                session_id, message
+            ):
                 logger.info(
                     "PERMISSION_DIALOG_DETECTED",  # Make it easy to grep for these
                     session_id=session_id,
