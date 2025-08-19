@@ -131,6 +131,18 @@ class Settings(BaseSettings):
 
         return self
 
+    @staticmethod
+    def generate_socket_path(project_name: str) -> str:
+        """Generate socket file name based on project name.
+
+        Args:
+            project_name: Name of the project directory
+
+        Returns:
+            Socket filename
+        """
+        return f"telegram-relay-{project_name}.sock"
+
     @property
     def is_production(self) -> bool:
         """Check if running in production mode."""

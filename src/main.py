@@ -234,7 +234,7 @@ async def run_application(app: Dict[str, Any]) -> int:
                 # Extract project name from CWD (last directory component)
                 project_name = Path(project_cwd).name
                 # Update socket path to use project name
-                config.socket_path = f"telegram-relay-{project_name}.sock"
+                config.socket_path = config.generate_socket_path(project_name)
                 logger.info(
                     "Generated project-based socket name",
                     cwd=project_cwd,

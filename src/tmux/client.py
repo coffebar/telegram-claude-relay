@@ -5,7 +5,12 @@ import time
 
 from typing import Dict, List
 
+import structlog
+
 from src.tmux.exceptions import TmuxCommandError, TmuxPaneNotFoundError
+
+
+logger = structlog.get_logger()
 
 
 class TmuxClient:
@@ -21,13 +26,13 @@ class TmuxClient:
 
     @staticmethod
     async def discover_claude_pane() -> str:
-        """Auto-discover first pane running 'claude' application.
+        """Auto-discover first available pane running 'claude' application.
 
         Returns:
             Pane target in format "session:window.pane"
 
         Raises:
-            TmuxPaneNotFoundError: If no claude pane found
+            TmuxPaneNotFoundError: If no available claude pane found
         """
         from src.tmux.exceptions import TmuxPaneNotFoundError
 
@@ -37,7 +42,7 @@ class TmuxClient:
             "list-panes",
             "-a",
             "-F",
-            "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command} #{pane_pid}",
+            "#{session_name}:#{window_index}.#{pane_index} #{pane_current_command} #{pane_pid} #{pane_current_path}",
         ]
 
         try:
@@ -51,23 +56,37 @@ class TmuxClient:
                 raise TmuxCommandError(f"tmux command failed: {error_msg}")
 
             output = stdout.decode().strip()
+            available_panes = []
+
             for line in output.split("\n"):
-                parts = line.split(" ", 2)
-                if len(parts) >= 2:
+                parts = line.split(" ", 3)
+                if len(parts) >= 3:
                     pane_target = parts[0]
                     pane_cmd = parts[1]
+                    pane_pid = parts[2]
+                    pane_cwd = parts[3] if len(parts) >= 4 else ""
+
+                    # Check if this is a claude pane
+                    is_claude_pane = False
 
                     # Direct match
                     if pane_cmd == "claude":
-                        return pane_target
-
+                        is_claude_pane = True
                     # Check process tree for claude child process
-                    if len(parts) == 3:
-                        pane_pid = parts[2]
-                        if await TmuxClient._has_claude_child_process(pane_pid):
-                            return pane_target
+                    elif await TmuxClient._has_claude_child_process(pane_pid):
+                        is_claude_pane = True
 
-            raise TmuxPaneNotFoundError("No pane running 'claude' application found")
+                    if is_claude_pane:
+                        # Check if this pane is already claimed by checking for socket file
+                        if await TmuxClient._is_pane_available(pane_cwd):
+                            available_panes.append(pane_target)
+
+            if available_panes:
+                return available_panes[0]
+
+            raise TmuxPaneNotFoundError(
+                "No available pane running 'claude' application found"
+            )
 
         except FileNotFoundError as e:
             raise TmuxCommandError("tmux command not found. Is tmux installed?") from e
@@ -135,6 +154,46 @@ class TmuxClient:
                 pass
 
         return False
+
+    @staticmethod
+    async def _is_pane_available(pane_cwd: str) -> bool:
+        """Check if a pane is available by checking for existing socket files.
+
+        Args:
+            pane_cwd: Current working directory of the pane
+
+        Returns:
+            True if pane is available (no socket file exists), False if already claimed
+        """
+        if not pane_cwd or not pane_cwd.strip():
+            return True  # If we can't determine CWD, assume available
+
+        try:
+            from pathlib import Path
+
+            cwd_path = Path(pane_cwd.strip())
+            if not cwd_path.exists():
+                return True  # Directory doesn't exist, assume available
+
+            # Extract project name from the path (last directory component)
+            project_name = cwd_path.name
+            if not project_name:
+                return True  # Can't determine project name, assume available
+
+            # Check for existing socket file in current working directory (where bot runs)
+            # Socket files are created in the bot's CWD, not the pane's CWD
+            from src.config.settings import Settings
+
+            current_cwd = Path.cwd()
+            socket_filename = Settings.generate_socket_path(project_name)
+            socket_file = current_cwd / socket_filename
+
+            # Socket file exists = pane is claimed by another bot instance
+            return not socket_file.exists()
+
+        except Exception:
+            # If any error occurs, assume pane is available to avoid blocking
+            return True
 
     async def _run_tmux_command(self, args: List[str]) -> str:
         """Execute tmux command and return output.
