@@ -198,7 +198,8 @@ class ConversationMonitor:
 
         result = {
             "type": "message",
-            "role": message.get("role", msg_type),  # Use role from message if available
+            # Use role from message if available
+            "role": message.get("role", msg_type),
             "content": content,
             "timestamp": data.get("timestamp", datetime.now().isoformat()),
             "tool_calls": tool_calls,
@@ -873,9 +874,20 @@ class ConversationMonitor:
                     message += f"\n**Extract:** {prompt}"
                 return message
 
+            elif tool_name.startswith("mcp__"):
+                # Generic MCP tool - extract server and tool name, format all string parameters
+                parts = tool_name.split("__")
+                if len(parts) >= 3:
+                    server_name = parts[1]
+                    actual_tool_name = parts[2]
+                    display_name = f"{server_name}: {actual_tool_name}"
+                else:
+                    display_name = tool_name
+
+                return self._format_generic_tool_with_params(display_name, params, "🔌")
             else:
-                # Unknown/unverified tool - generic display
-                return f"🔧 **{tool_name}**"
+                # Unknown/unverified tool - generic display with parameters
+                return self._format_generic_tool_with_params(tool_name, params, "🔧")
 
         elif notif_type == "post_tool_use":
             tool_name = notification.get("tool_name", "Unknown")
@@ -1105,10 +1117,179 @@ class ConversationMonitor:
                         message += f" - {bytes_fetched} bytes"
 
                 return message
+            elif tool_name.startswith("mcp__"):
+                # Generic MCP tool - format tool response with all available fields
+                parts = tool_name.split("__")
+                if len(parts) >= 3:
+                    server_name = parts[1]
+                    actual_tool_name = parts[2]
+                    display_name = f"{server_name}: {actual_tool_name}"
+                else:
+                    display_name = tool_name
+
+                return self._format_generic_tool_response(
+                    display_name, tool_response, "✅", "🔌"
+                )
             else:
-                return f"✅ **{tool_name} completed**"
+                # Unknown/unverified tool - generic display with response
+                return self._format_generic_tool_response(
+                    tool_name, tool_response, "✅", "🔧"
+                )
 
         return None
+
+    def _format_generic_tool_with_params(
+        self, tool_name: str, params: dict, icon: str
+    ) -> str:
+        """Format generic tool with all string parameters as code blocks."""
+        # Known string fields from tool_input analysis
+        string_fields = [
+            "command",
+            "description",
+            "path",
+            "file_path",
+            "old_string",
+            "new_string",
+            "content",
+            "plan",
+            "pattern",
+            "url",
+            "prompt",
+            "query",
+            "filename",
+            "text",
+            "message",
+            "selector",
+            "script",
+            "value",
+            "filePattern",
+            "mode",
+            "lines",
+        ]
+
+        message = f"{icon} **{tool_name}**"
+
+        # Handle numeric fields that should be shown inline (like startLine)
+        numeric_fields = ["startLine"]
+        for field in numeric_fields:
+            if field in params and params[field] is not None:
+                field_display = field.replace("_", " ").title()
+                message += f" (from {field_display.lower()} {params[field]})"
+
+        # Extract and format all string parameters
+        for field in string_fields:
+            if field in params and isinstance(params[field], str):
+                field_value = params[field]
+
+                # Special handling for vim_edit lines field - show even if empty
+                if field == "lines" and "vim_edit" in tool_name.lower():
+                    field_display = field.replace("_", " ").title()
+                    if field_value.strip():
+                        message += (
+                            f"\n**{field_display}:**\n```\n{field_value.strip()}\n```"
+                        )
+                    else:
+                        message += f"\n**{field_display}:**\n(empty)"
+                # Regular handling for non-empty fields
+                elif field_value.strip():
+                    field_value = field_value.strip()
+                    field_display = field.replace("_", " ").title()
+                    message += f"\n**{field_display}:**\n```\n{field_value}\n```"
+
+        return message
+
+    def _format_generic_tool_response(
+        self, tool_name: str, tool_response: dict, status_icon: str, tool_icon: str
+    ) -> str:
+        """Format generic tool response with all available fields as code blocks."""
+        # Known response fields from tool_response analysis
+        string_response_fields = [
+            "stdout",
+            "stderr",
+            "content",
+            "mode",
+            "url",
+            "returnCodeInterpretation",
+        ]
+        numeric_response_fields = [
+            "numLines",
+            "numFiles",
+            "duration",
+            "durationMs",
+            "durationSeconds",
+            "totalDurationMs",
+            "totalTokens",
+            "totalToolUseCount",
+            "code",
+            "bytes",
+        ]
+        boolean_response_fields = ["interrupted", "truncated", "userModified"]
+        array_response_fields = ["filenames", "results", "structuredPatch"]
+
+        message = f"{status_icon} **{tool_name} completed**"
+
+        if not isinstance(tool_response, dict):
+            # If response is not a dict, show it as-is
+            if tool_response:
+                message += f"\n\n**Response:**\n```\n{str(tool_response)}\n```"
+            return message
+
+        # Extract and format string fields
+        for field in string_response_fields:
+            if (
+                field in tool_response
+                and isinstance(tool_response[field], str)
+                and tool_response[field].strip()
+            ):
+                field_value = tool_response[field].strip()
+                field_display = field.replace("_", " ").title()
+                # Truncate very long content
+                if len(field_value) > 1000:
+                    field_value = field_value[:1000] + "\n... (truncated)"
+                message += f"\n\n**{field_display}:**\n```\n{field_value}\n```"
+
+        # Extract and format numeric fields
+        status_parts = []
+        for field in numeric_response_fields:
+            if field in tool_response and tool_response[field] is not None:
+                field_value = tool_response[field]
+                field_display = field.replace("_", " ").title()
+                if field.endswith("Ms"):
+                    status_parts.append(f"{field_display}: {field_value}ms")
+                elif field.endswith("Seconds"):
+                    status_parts.append(f"{field_display}: {field_value}s")
+                else:
+                    status_parts.append(f"{field_display}: {field_value}")
+
+        # Extract and format boolean fields
+        for field in boolean_response_fields:
+            if field in tool_response and tool_response[field]:
+                field_display = field.replace("_", " ").title()
+                status_parts.append(field_display)
+
+        # Add status parts if any
+        if status_parts:
+            message += f" ({', '.join(status_parts)})"
+
+        # Extract and format array fields
+        for field in array_response_fields:
+            if (
+                field in tool_response
+                and isinstance(tool_response[field], list)
+                and tool_response[field]
+            ):
+                field_value = tool_response[field]
+                field_display = field.replace("_", " ").title()
+                if len(field_value) <= 10:
+                    # Show all items if 10 or fewer
+                    items_text = "\n".join(f"• {item}" for item in field_value)
+                else:
+                    # Show first 10 and count
+                    items_text = "\n".join(f"• {item}" for item in field_value[:10])
+                    items_text += f"\n... and {len(field_value) - 10} more"
+                message += f"\n\n**{field_display}:**\n{items_text}"
+
+        return message
 
 
 class ConversationHookHandler:
