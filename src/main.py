@@ -252,8 +252,48 @@ async def run_application(app: Dict[str, Any]) -> int:
     def cleanup_socket():
         if socket_path.exists():
             try:
-                socket_path.unlink()
-                logger.info("Cleaned up socket file via atexit")
+                # Import here to avoid circular imports at module level
+                import asyncio
+
+                from src.tmux.client import TmuxClient
+
+                # Check if socket is actively in use by other processes
+                is_active = False
+                try:
+                    # Run the async check in a new event loop if no loop is running
+                    try:
+                        asyncio.get_running_loop()
+                        # Cannot run new async operations in existing loop during cleanup
+                        # Use subprocess directly for safety
+                        import subprocess
+
+                        result = subprocess.run(
+                            ["lsof", str(socket_path)],
+                            capture_output=True,
+                            text=True,
+                            timeout=2,
+                        )
+                        is_active = result.returncode == 0 and result.stdout.strip()
+                    except RuntimeError:
+                        # No event loop running, can use asyncio.run
+                        is_active = asyncio.run(
+                            TmuxClient._is_socket_in_use(str(socket_path))
+                        )
+                except Exception:
+                    # If we can't determine if socket is active, err on side of caution
+                    is_active = True
+                    logger.warning(
+                        "Could not determine socket usage, skipping cleanup for safety"
+                    )
+
+                if not is_active:
+                    socket_path.unlink()
+                    logger.info("Cleaned up socket file via atexit")
+                else:
+                    logger.info(
+                        "Socket file still in use by other processes, skipping cleanup"
+                    )
+
             except Exception as e:
                 logger.error("Failed to cleanup socket file", error=str(e))
 
@@ -282,7 +322,9 @@ async def run_application(app: Dict[str, Any]) -> int:
         # Start the socket server (required for Claude response handling)
         if bot.app and bot.app.bot:
             # Create webhook handler and monitor
-            webhook_handler = ConversationWebhookHandler(bot.app.bot, config)
+            webhook_handler = ConversationWebhookHandler(
+                bot.app.bot, config, project_name
+            )
 
             # Add webhook handler to bot dependencies
             bot.app.bot_data["webhook_handler"] = webhook_handler
@@ -359,10 +401,16 @@ async def run_application(app: Dict[str, Any]) -> int:
 
         logger.info("Application shutdown complete")
 
-    # Return exit code based on restart request
+    # Return exit code based on restart request or bot error
     if restart_requested:
         logger.info("Returning exit code 42 for restart")
         return 42
+
+    # Check if bot had an error condition
+    if bot and hasattr(bot, "exit_code") and bot.exit_code != 0:
+        logger.info(f"Returning bot exit code {bot.exit_code}")
+        return bot.exit_code
+
     return 0
 
 

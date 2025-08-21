@@ -71,9 +71,20 @@ class UnixSocketServer:
     async def start(self):
         """Start the Unix socket server."""
 
-        # Remove existing socket file if it exists
+        # Check if socket file exists and if it's actively in use
         if self.socket_path.exists():
-            self.socket_path.unlink()
+            from src.tmux.client import TmuxClient
+
+            is_active = await TmuxClient._is_socket_in_use(str(self.socket_path))
+            if is_active:
+                raise RuntimeError(
+                    f"Socket file {self.socket_path} is already in use by another bot instance. "
+                    f"Cannot start multiple bots for the same project."
+                )
+            else:
+                # Socket file exists but is not active (stale), safe to remove
+                logger.info(f"Removing stale socket file: {self.socket_path}")
+                self.socket_path.unlink()
 
         # Get the target CWD before starting
         await self.initialize_target_cwd()

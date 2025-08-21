@@ -156,14 +156,41 @@ class TmuxClient:
         return False
 
     @staticmethod
+    async def _is_socket_in_use(socket_path: str) -> bool:
+        """Check if a Unix socket is actively being used by a process.
+
+        Args:
+            socket_path: Path to the Unix socket file
+
+        Returns:
+            True if socket is actively in use, False otherwise
+        """
+        try:
+            # Use lsof to check if any process is using the socket
+            proc = await asyncio.create_subprocess_exec(
+                "lsof",
+                socket_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+
+            # lsof returns 0 if the file is in use, 1 if not
+            return proc.returncode == 0 and stdout.strip()
+
+        except (FileNotFoundError, Exception):
+            # If lsof is not available or fails, assume socket is not in use
+            return False
+
+    @staticmethod
     async def _is_pane_available(pane_cwd: str) -> bool:
-        """Check if a pane is available by checking for existing socket files.
+        """Check if a pane is available by checking for active socket files.
 
         Args:
             pane_cwd: Current working directory of the pane
 
         Returns:
-            True if pane is available (no socket file exists), False if already claimed
+            True if pane is available (no active socket exists), False if already claimed
         """
         if not pane_cwd or not pane_cwd.strip():
             return True  # If we can't determine CWD, assume available
@@ -188,8 +215,15 @@ class TmuxClient:
             socket_filename = Settings.generate_socket_path(project_name)
             socket_file = current_cwd / socket_filename
 
-            # Socket file exists = pane is claimed by another bot instance
-            return not socket_file.exists()
+            # If socket file doesn't exist, pane is available
+            if not socket_file.exists():
+                return True
+
+            # If socket file exists, check if it's actively in use
+            is_active = await TmuxClient._is_socket_in_use(str(socket_file))
+
+            # Pane is available only if socket exists but is not actively used
+            return not is_active
 
         except Exception:
             # If any error occurs, assume pane is available to avoid blocking

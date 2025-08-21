@@ -42,6 +42,7 @@ class ClaudeTelegramBot:
         self.app: Optional[Application] = None
         self.is_running = False
         self.command_discovery: Optional[CommandDiscovery] = None
+        self.exit_code = 0  # Track exit code for error conditions
 
     async def initialize(self) -> None:
         """Initialize bot application."""
@@ -325,9 +326,35 @@ class ClaudeTelegramBot:
                 # Polling mode - initialize and start polling manually
                 await self.app.initialize()
                 await self.app.start()
+
+                # Set custom error callback to handle Telegram conflicts
+                def polling_error_callback(exc: Exception) -> None:
+                    from telegram.error import Conflict
+
+                    if isinstance(exc, Conflict) and "getUpdates" in str(exc):
+                        logger.error(
+                            "Multiple bot instances detected during polling - terminating to prevent conflicts",
+                            error=str(exc),
+                        )
+                        # Print error message and stop bot gracefully
+                        print("\n❌ ERROR: Multiple Telegram bot instances detected!")
+                        print("Only one bot instance can run with the same token.")
+                        print(
+                            "Please stop other bot instances before starting this one."
+                        )
+
+                        # Stop the bot gracefully with error exit code
+                        self.is_running = False
+                        self.exit_code = 1
+                        return
+
+                    # For other errors, log and continue
+                    logger.error("Polling error", error=str(exc))
+
                 await self.app.updater.start_polling(
                     allowed_updates=Update.ALL_TYPES,
                     drop_pending_updates=True,
+                    error_callback=polling_error_callback,
                 )
 
                 # Keep running until manually stopped
