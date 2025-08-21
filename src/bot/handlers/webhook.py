@@ -7,6 +7,7 @@ import telegramify_markdown
 
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
+from telegram.helpers import escape_markdown
 
 from ...claude.permission_monitor import permission_monitor
 from ...config.settings import Settings
@@ -244,9 +245,12 @@ class MessageTracker:
 class ConversationWebhookHandler:
     """Handles incoming webhook requests with Claude conversation updates."""
 
-    def __init__(self, bot: Bot, settings: Settings):
+    def __init__(
+        self, bot: Bot, settings: Settings, project_name: Optional[str] = None
+    ):
         self.bot = bot
         self.settings = settings
+        self.project_name = project_name or "Claude"
         self.session_to_chat: Dict[str, int] = {}  # session_id -> chat_id mapping
         self.subscribed_users: set[int] = set()  # Track subscribed users
         self.last_telegram_prompts: Dict[int, str] = (
@@ -1176,8 +1180,11 @@ class ConversationWebhookHandler:
             self.subscribed_users.add(user_id)
 
         # Notify users that they are subscribed
+        # Escape project name for MarkdownV2
+        escaped_project_name = escape_markdown(self.project_name, version=2)
+
         notification_message = (
-            "🚀 **Bot Started**\n\n"
+            f"🚀 **{escaped_project_name} Bot Started**\n\n"
             "You are now subscribed to receive Claude conversation updates\\.\n"
             "You'll receive notifications when Claude uses tools or performs actions\\."
         )
